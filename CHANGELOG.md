@@ -7,6 +7,12 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in Nightly and RC update channels with persistent server-wide selection and explicit installation before switching; previews can return to Stable through the health-checked updater.
+- Daily validated Nightly builds and Stable promotion of an exact RC commit after reviewed native-agent/device evidence and at least 24 hours of observation.
+- Shared release validation harness with commit-bound receipts and logs, a real v0.3.29 upgrade/PWA/queue/channel regression, and committed repository/scoped agent rules.
+
 ## [0.3.29] - 2026-09-28
 
 ### Fixed

@@ -110,19 +110,11 @@ after changing the staged session. Files, images, push and remote PCs are not pa
 
 ## Releasing
 
-1. Open a release PR that bumps `version` in `package.json` and `herdr-plugin.toml`,
-   and moves the `Unreleased` notes in [CHANGELOG.md](../CHANGELOG.md) under the new version.
-2. Merge it after CI passes.
-3. Run **Actions → Release → Run workflow**, select `main`, and enter `X.Y.Z` without `v`.
-   The CLI equivalent is `gh workflow run release.yml --ref main -f version=X.Y.Z`.
-
-The workflow validates metadata, then runs the same unit, integration and browser checks
-as PRs against the exact `main` commit selected when the run starts. Only after all checks
-pass does it create the tag and GitHub release. A failed validation creates neither.
-Do not push release tags by hand: installed updaters read Git tags directly, so a tag is
-visible to them even without a GitHub release. Existing tags cannot be reused; fix a
-published version with a new patch release. If publishing fails after a tag was created,
-verify that tag's commit and repair its GitHub release rather than moving the tag.
+Use the [release runbook](releasing.md). Main remains the integration branch;
+Nightly and RC are opt-in channels. Prepare version metadata in a PR, publish an RC
+with `prerelease.yml`, collect reviewed device/native-agent observations for at least
+24 hours, then dispatch `release.yml` with `candidate=vX.Y.Z-rc.RUN`. Stable promotes
+the exact RC commit after rerunning its harness. Never manually push version tags.
 
 Remote-PC runtime bundles are released separately: raise `REMOTE_BUNDLE_VERSION` in `shared/machines.ts` and push a `remote-vN` tag. See [remote PCs](remote-pcs.md).
 
@@ -138,7 +130,9 @@ The [CI workflow](../.github/workflows/ci.yml) runs on every PR and `main` push:
 - **Fast checks**: frozen dependency install, generated type freshness, typecheck, build,
   and `bun run test:unit`. This suite does not start herdr.
 - **Integration and browser**: checksum-pinned herdr 0.9.1, Node 22, isolated state/session,
-  `bun run test:integration`, and `scripts/ui-regression.ts` with the lockfile's Chromium.
+  `verify:integration` and `verify:browser` with the lockfile's Chromium, including real
+  stable-to-candidate upgrade, PWA storage, channel switch and rollback tests. Both jobs
+  upload structured receipts and logs; see [the harness](releasing.md#validation-harness).
   Missing herdr fails the integration suite. The owned session is stopped even on failure.
   Integration tests have a 15-second default timeout so their bounded process-startup
   probes can finish; individual tests can still specify a longer timeout.

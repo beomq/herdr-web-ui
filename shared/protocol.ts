@@ -50,6 +50,7 @@ export type { Machine, MachineEvent, PaneTarget, SetupJob, SetupRequest, SetupAc
  *         Tailscale on this PC already serves, or the command to run), no-store
  *  GET    /api/updates                   -> UpdateStatus (shared/update.ts), no-store
  *  POST   /api/updates/check             -> 202 { accepted: true }
+ *  POST   /api/updates/channel           { channel: stable|nightly|rc } -> 202; explicit opt-in, no install
  *  POST   /api/updates/install           -> 202 { accepted: true }
  *         Update POSTs require X-Herdr-Update: 1, same-origin browser requests,
  *         and the usual token gate. Managed starts only; status is polled during restart.

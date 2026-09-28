@@ -1,3 +1,4 @@
+import { isUpdateChannel } from "../shared/release-channel.ts";
 import { unmanagedUpdateStatus, type UpdateCommand, type UpdateStatus } from "../shared/update.ts";
 import { jsonResponse } from "./http.ts";
 
@@ -22,7 +23,7 @@ export function connectUpdater(): UpdateService {
   };
 }
 
-export function handleUpdateRequest(request: Request, pathname: string, service?: UpdateService): Response {
+export async function handleUpdateRequest(request: Request, pathname: string, service?: UpdateService): Promise<Response> {
   const status = service?.status() ?? unmanagedUpdateStatus();
   const reply = (body: unknown, code = 200) => {
     const response = jsonResponse(body, code);
@@ -31,8 +32,8 @@ export function handleUpdateRequest(request: Request, pathname: string, service?
   };
   const fail = (code: string, message: string, http: number) => reply({ error: { code, message } }, http);
   if (pathname === "/api/updates" && request.method === "GET") return reply(status);
-  if (request.method !== "POST" || (pathname !== "/api/updates/check" && pathname !== "/api/updates/install")) {
-    return fail("method_not_allowed", "Use GET /api/updates or POST /api/updates/check or /install", 405);
+  if (request.method !== "POST" || !["/api/updates/check", "/api/updates/install", "/api/updates/channel"].includes(pathname)) {
+    return fail("method_not_allowed", "Use GET /api/updates or POST /api/updates/check or /install or /channel", 405);
   }
   // A custom header is not submit-able by an HTML form. Cross-origin preflights
   // are refused (no CORS headers); Sec-Fetch-Site also rejects browser CSRF.
@@ -48,6 +49,15 @@ export function handleUpdateRequest(request: Request, pathname: string, service?
   if (["checking", "building", "restarting"].includes(status.phase)) return fail("update_busy", "An update operation is already running.", 409);
   if (pathname.endsWith("/install") && (status.blocked_reason || !status.available)) {
     return fail("update_unavailable", status.blocked_reason ?? "No update is available. Check again first.", 409);
+  }
+  if (pathname.endsWith("/channel")) {
+    let body: unknown;
+    try { body = await request.json(); } catch { return fail("invalid_channel", "Expected a JSON channel.", 400); }
+    if (!body || typeof body !== "object" || !("channel" in body) || !isUpdateChannel(body.channel)) {
+      return fail("invalid_channel", "Choose stable, nightly or rc.", 400);
+    }
+    service.request({ channel: body.channel });
+    return reply({ accepted: true }, 202);
   }
   service.request(pathname.endsWith("/check") ? "check" : "install");
   return reply({ accepted: true }, 202);

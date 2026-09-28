@@ -22,7 +22,11 @@
     "generate:types": "bun run scripts/generate-protocol-types.ts",
     "build:remote": "bun run scripts/build-remote-bundle.ts",
     "build:site": "bun scripts/build-site.ts",
-    "test:ssh": "bun run scripts/ssh-integration.ts"
+    "test:ssh": "bun run scripts/ssh-integration.ts",
+    "verify:fast": "bun scripts/release-harness.ts fast",
+    "verify:integration": "bun scripts/release-harness.ts integration",
+    "verify:browser": "bun scripts/release-harness.ts browser",
+    "release:evidence": "bun scripts/release-evidence.ts"
   },
   "dependencies": {
     "@lydell/node-pty": "1.1.0",

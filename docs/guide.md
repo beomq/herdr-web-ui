@@ -238,7 +238,13 @@ Attaches never use `--takeover`, so they coexist with your own herdr TUI.
 
 ## Updates
 
-`bun run start` and the plugin look for a newer **release** 10 seconds after start and then every 5 minutes. A release is a `vX.Y.Z` tag ([changelog](../CHANGELOG.md)); commits between releases never reach installs. When a new version is out, the header names it, and **Settings → Updates** installs it. To install releases without asking, set `HERDR_WEB_AUTO_UPDATE=1`.
+`bun run start` and the plugin look for a newer **release** 10 seconds after start and then every 5 minutes. By default, Stable follows `vX.Y.Z` tags ([changelog](../CHANGELOG.md)); untagged commits never reach installs. When a new version is out, the header names it, and **Settings → Updates** installs it. To install releases without asking, set `HERDR_WEB_AUTO_UPDATE=1`.
+
+**Update channel** in Settings offers Stable (recommended), Nightly (early testing), and
+RC (release candidates). This choice applies to the server and every connected device.
+Preview builds may have bugs. Changing the channel checks availability but waits for
+**Update and restart** before installing, even with automatic installation enabled.
+Choosing Stable from a newer preview offers **Return and restart**. [Release channels →](releasing.md)
 
 An update is built and typechecked in a private checkout while the current server keeps serving. The new server must pass a health check, or the previous build comes back. herdr and your agents keep running, and a **Reload app** notice lets you save drafts before the new frontend loads.
 

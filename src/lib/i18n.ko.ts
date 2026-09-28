@@ -6,6 +6,15 @@
  * braces keep their English names.
  */
 export const KO: Record<string, string> = {
+  "Update channel": "업데이트 채널",
+  "Stable — recommended": "Stable — 권장",
+  "Nightly — early testing": "Nightly — 사전 테스트",
+  "RC — release candidate": "RC — 출시 후보",
+  "The channel applies to this server and all its devices. Preview builds may have bugs. Switching channels requires an explicit install.": "이 서버에 연결된 모든 기기에 적용됩니다. 시험판에는 버그가 있을 수 있으며, 채널을 바꾼 뒤 설치 버튼을 눌러야 전환됩니다.",
+  "Automatic installation is paused until you install the selected channel.": "선택한 채널을 직접 설치할 때까지 자동 설치가 중지됩니다.",
+  "This returns to an older release. Your herdr sessions keep running.": "이전 릴리즈로 돌아갑니다. herdr 세션은 계속 실행됩니다.",
+  "Return and restart": "이전 릴리즈로 돌아가기",
+  "No release is available for this channel yet.": "아직 이 채널에 릴리즈가 없습니다.",
   // ---- settings ----
   "Settings": "설정",
   "Close settings": "설정 닫기",

@@ -23,3 +23,10 @@ AI review is advisory; CI and maintainer review determine whether a PR can merge
 
 Additional local AGENTS.md instructions may exist in a developer checkout. The rules
 above are committed so remote reviewers receive the essential project constraints.
+
+- Release channels and promotion gates are defined in docs/releasing.md and AGENTS.md.
+  Stable must exclude preview tags. Channel switches require explicit install even
+  with auto-update. Verify preview-to-Stable return, persistence and failed-boot recovery.
+- Stable must promote the exact observed RC SHA after clean passing harness receipts
+  and reviewed native/device evidence spanning at least 24 hours. Missing evidence,
+  wrong commits, fabricated results or lowered gates are release blockers.

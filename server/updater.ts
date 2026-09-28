@@ -3,11 +3,10 @@ import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { unmanagedUpdateStatus, type UpdateCommand, type UpdateStatus } from "../shared/update.ts";
+import { isUpdateChannel, latestReleaseTag, parseReleaseTag, type UpdateChannel } from "../shared/release-channel.ts";
 
-export interface Release { directory: string; revision: string; source_revision: string }
+export interface Release { directory: string; revision: string; source_revision: string; tag?: string }
 const SHA = /^[0-9a-f]{40,64}$/;
-/** A release is a plain `vX.Y.Z` tag: `remote-v*` bundle tags and pre-releases never qualify. */
-const RELEASE_TAG = /^v(\d+)\.(\d+)\.(\d+)$/;
 
 function packageVersion(directory: string): string | null {
   try {
@@ -52,6 +51,7 @@ export class Updater {
   private timer?: ReturnType<typeof setInterval>;
   private initialTimer?: ReturnType<typeof setTimeout>;
   private sourceRevision = "";
+  private preferenceError: string | null = null;
   private failedRevision: string | null = null;
 
   constructor(readonly options: {
@@ -76,6 +76,14 @@ export class Updater {
   async initialize(): Promise<Release | null> {
     mkdirSync(this.options.stateDir, { recursive: true, mode: 0o700 });
     try {
+      const preference = JSON.parse(readFileSync(join(this.options.stateDir, "channel.json"), "utf8"));
+      if (!isUpdateChannel(preference.channel) || typeof preference.pending !== "boolean") throw new Error("Invalid channel preference");
+      this.status.channel = preference.channel;
+      this.status.channel_switch_pending = preference.pending;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") this.preferenceError = "Cannot read update channel preference. Select a channel in Settings to recover.";
+    }
+    try {
       const failed = JSON.parse(readFileSync(join(this.options.stateDir, "failed.json"), "utf8")) as { revision?: string };
       if (failed.revision && SHA.test(failed.revision)) this.failedRevision = failed.revision;
     } catch { /* no failed automatic candidate */ }
@@ -93,7 +101,13 @@ export class Updater {
               await runCommand(saved.directory, ["git", "rev-parse", "HEAD"]) === saved.revision) this.release = saved;
         } catch { /* missing/stale release: use the source checkout */ }
       }
-      this.patch({ current_revision: this.release.revision, current_version: packageVersion(this.release.directory), blocked_reason: reason });
+      const tags = (await this.git("tag", "--points-at", this.release.revision)).split("\n");
+      const savedTag = this.release.tag;
+      const tag = savedTag && tags.includes(savedTag) && parseReleaseTag(savedTag) ? savedTag :
+        (latestReleaseTag(tags, this.status.channel) ?? latestReleaseTag(tags, "stable"))?.tag;
+      if (tag) this.release.tag = tag;
+      this.patch({ current_revision: this.release.revision, current_tag: tag ?? null,
+        current_version: tag?.slice(1) ?? packageVersion(this.release.directory), blocked_reason: reason ?? this.preferenceError });
     } catch {
       this.patch({ managed: false, blocked_reason: "Updates require a Git checkout on the main branch." });
     }
@@ -119,32 +133,45 @@ export class Updater {
 
   private async discover() {
     this.patch({ phase: "checking", error: this.options.notice ?? null, available: false, blocked_reason: null });
-    const reason = await this.sourceBlock();
+    const reason = this.preferenceError ?? await this.sourceBlock();
     if (reason) { this.patch({ blocked_reason: reason, checked_at: new Date().toISOString() }); return; }
-    // Only published releases update installs: commits pushed to main without a tag stay put.
-    await this.git("fetch", "--no-tags", "origin", "+refs/tags/v*:refs/tags/v*");
-    const tags = (await this.git("for-each-ref", "--sort=-v:refname", "--format=%(refname:short)", "refs/tags/v*"))
-      .split("\n").filter((tag) => RELEASE_TAG.test(tag));
+    // Refuse moved tags; channel candidates must also be part of upstream main.
+    await this.git("fetch", "--no-tags", "origin", "refs/tags/v*:refs/tags/v*", "+refs/heads/main:refs/remotes/origin/main");
+    const tags = (await this.git("for-each-ref", "--format=%(refname:short)", "refs/tags/v*")).split("\n");
     const checked_at = new Date().toISOString();
-    const latest = tags[0];
+    const latest = latestReleaseTag(tags, this.status.channel);
     if (!latest) {
-      this.patch({ latest_revision: null, latest_version: null, checked_at, blocked_reason: null, available: false });
+      this.patch({ latest_revision: null, latest_version: null, checked_at, blocked_reason: null, available: false, is_downgrade: false });
       return;
     }
     // ^{commit} peels an annotated tag to the commit the build and the health check report
-    const target = await this.git("rev-parse", `${latest}^{commit}`);
+    const target = await this.git("rev-parse", `${latest.tag}^{commit}`);
     if (!SHA.test(target)) throw new Error("Invalid update revision");
     const current = this.release!.revision;
     let block: string | null = null;
     let available = false;
-    if (target !== current) {
+    let downgrade = false;
+    if (!await this.ancestor(target, "origin/main")) {
+      block = "This release is not part of upstream main history.";
+    } else if (target !== current) {
       if (await this.ancestor(current, target)) available = true;
-      // running ahead of the latest release (a development checkout) is simply up to date
-      else if (!await this.ancestor(target, current)) {
-        block = "The running version is not part of the release history; automatic downgrade is disabled.";
-      }
-    }
-    this.patch({ latest_revision: target, latest_version: latest.slice(1), checked_at, blocked_reason: block, available });
+      else if (await this.ancestor(target, current)) {
+        const runningChannel = parseReleaseTag(this.release!.tag ?? "")?.channel;
+        // Only an explicit switch away from a known preview may go backwards.
+        downgrade = this.status.channel_switch_pending && !!runningChannel && runningChannel !== "stable" && runningChannel !== this.status.channel;
+        available = downgrade;
+      } else block = "The running version is not part of the release history; automatic downgrade is disabled.";
+    } else available = this.status.channel_switch_pending;
+    this.patch({ latest_revision: target, latest_version: latest.version, checked_at,
+      blocked_reason: block, available, is_downgrade: downgrade });
+  }
+
+  private saveChannel(channel: UpdateChannel, pending: boolean) {
+    const file = join(this.options.stateDir, "channel.json");
+    writeFileSync(`${file}.tmp`, JSON.stringify({ channel, pending }), { mode: 0o600 });
+    renameSync(`${file}.tmp`, file);
+    this.preferenceError = null;
+    this.patch({ channel, channel_switch_pending: pending });
   }
 
   /** herdr's plugin checkout is shallow: fetch the missing history once before calling two commits unrelated. */
@@ -162,8 +189,12 @@ export class Updater {
     let stage: string | null = null;
     let attempted: string | null = null;
     try {
+      if (typeof command === "object") {
+        if (!isUpdateChannel(command.channel)) throw new Error("Invalid update channel");
+        if (command.channel !== this.status.channel || this.preferenceError) this.saveChannel(command.channel, true);
+      }
       await this.discover();
-      if ((command === "install" || this.options.autoUpdate) && this.status.available) {
+      if ((command === "install" || (command === "check" && this.options.autoUpdate && !this.status.channel_switch_pending)) && this.status.available && !this.status.blocked_reason) {
         const revision = this.status.latest_revision!;
         if (command === "check" && revision === this.failedRevision) {
           this.patch({ phase: "error", error: "Automatic installation of this revision previously failed. Use Update and restart to retry, or wait for a newer revision." });
@@ -184,7 +215,7 @@ export class Updater {
         const reason = await this.sourceBlock();
         if (reason) throw new Error(reason);
         this.controller.signal.throwIfAborted();
-        const next = { directory: stage, revision, source_revision: this.sourceRevision };
+        const next = { directory: stage, revision, source_revision: this.sourceRevision, tag: `v${this.status.latest_version}` };
         this.patch({ phase: "restarting" });
         const previous = this.release;
         await this.options.activate(next, () => {
@@ -194,7 +225,8 @@ export class Updater {
         });
         this.release = next;
         stage = null;
-        this.patch({ current_revision: revision, current_version: packageVersion(next.directory), available: false });
+        this.saveChannel(this.status.channel, false);
+        this.patch({ current_revision: revision, current_tag: next.tag, current_version: next.tag.slice(1), available: false, is_downgrade: false });
         this.failedRevision = null;
         rmSync(join(this.options.stateDir, "failed.json"), { force: true });
         for (const entry of readdirSync(this.options.stateDir, { withFileTypes: true })) {

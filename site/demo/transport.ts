@@ -148,7 +148,7 @@ async function route(url: URL, method: string, init: RequestInit | undefined, in
   if (path === "/api/machines") return json({ machines });
   if (path === "/api/session") return json({ snapshot: snapshot() });
   if (path === "/api/agents") return json(agentsFixture);
-  if (path === "/api/updates") return json({ managed: false, auto_update: false, phase: "idle", current_revision: null, latest_revision: null, current_version: __APP_VERSION__, latest_version: null, available: false, checked_at: null, blocked_reason: null, error: null }, 200, { "cache-control": "no-store" });
+  if (path === "/api/updates") return json({ managed: false, auto_update: false, channel: "stable", current_tag: null, channel_switch_pending: false, is_downgrade: false, phase: "idle", current_revision: null, latest_revision: null, current_version: __APP_VERSION__, latest_version: null, available: false, checked_at: null, blocked_reason: null, error: null }, 200, { "cache-control": "no-store" });
   if (path === "/api/access") return json({ port: 7317, tailscale: { state: "running", dns_name: "workstation.example.ts.net", serving_url: "https://workstation.example.ts.net", serve_command: null, serve_url: null } });
   if (path === "/api/push" || path.startsWith("/api/push/")) return error("push_unavailable", "the demo sends no alerts", 404);
   if (path === "/api/machines/settings") return json({ auto_update_bridges: true });

@@ -1,3 +1,4 @@
+import { isUpdateChannel } from "../shared/release-channel.ts";
 /**
  * The supervisor owns builds and bridge restarts; herdr continues to own every PTY.
  * server/managed.ts launches it from the active release, so an update replaces this code too:
@@ -58,7 +59,7 @@ export async function runSupervisor(root = resolve(import.meta.dir, "..")) {
         HERDR_WEB_REVISION: release?.revision ?? "" },
       ipc(message) {
         if (message?.type === "update-status-request") publish();
-        if (message?.type === "update-command" && (message.command === "check" || message.command === "install")) {
+        if (message?.type === "update-command" && (message.command === "check" || message.command === "install" || isUpdateChannel(message.command?.channel))) {
           void updater.request(message.command);
         }
       },

@@ -241,6 +241,73 @@ describe("managed source updates with real Git repositories and builds", () => {
     expect(updater.status.current_revision).toBe(target);
   });
 
+  it("persists opt-in, never auto-installs a channel switch, and explicitly returns to Stable", async () => {
+    const stable = await release("stable", "v0.3.30");
+    await updater.request("install");
+    const previewTag = "v0.3.31-nightly.20260928120000.1.abcdef123456";
+    const preview = await release("preview", previewTag);
+    await release("candidate", "v0.3.31-rc.1");
+    updater.options.autoUpdate = true;
+    await updater.request("check");
+    expect(updater.status.current_revision).toBe(stable);
+    await updater.request({ channel: "nightly" });
+    expect(updater.status.channel_switch_pending).toBe(true);
+    expect(updater.status.latest_revision).toBe(preview);
+    await updater.request("check");
+    expect(updater.status.current_revision).toBe(stable);
+    const resumed = new Updater(updater.options);
+    await resumed.initialize();
+    expect(resumed.status.channel).toBe("nightly");
+    expect(resumed.status.channel_switch_pending).toBe(true);
+    await resumed.request("install");
+    expect(resumed.status.current_revision).toBe(preview);
+    expect(resumed.status.current_tag).toBe(previewTag);
+    expect(resumed.status.channel_switch_pending).toBe(false);
+    await resumed.request({ channel: "stable" });
+    expect(resumed.status.is_downgrade).toBe(true);
+    await resumed.request("check");
+    expect(resumed.status.current_revision).toBe(preview);
+    await resumed.request("install");
+    expect(resumed.status.current_revision).toBe(stable);
+    expect(resumed.status.current_tag).toBe("v0.3.30");
+    resumed.stop();
+  });
+
+  it("does not install preview tags outside upstream main or recover corrupt preferences automatically", async () => {
+    const main = await git(upstream, "rev-parse", "HEAD");
+    await release("side candidate", "v0.3.30-rc.1");
+    await git(upstream, "reset", "--hard", main);
+    await updater.request({ channel: "rc" });
+    expect(updater.status.available).toBe(false);
+    expect(updater.status.blocked_reason).toContain("upstream main");
+    writeFileSync(join(stateDir, "channel.json"), "broken");
+    const resumed = new Updater({ ...updater.options, autoUpdate: true });
+    await resumed.initialize();
+    await release("valid stable", "v0.3.30");
+    await resumed.request("check");
+    expect(resumed.status.available).toBe(false);
+    expect(resumed.status.blocked_reason).toContain("channel preference");
+    await resumed.request({ channel: "stable" });
+    expect(resumed.status.available).toBe(true);
+    expect(resumed.status.channel_switch_pending).toBe(true);
+    expect(resumed.status.current_revision).toBe(main);
+    resumed.stop();
+  });
+
+  it("keeps the preview active and the switch pending if returning to Stable fails", async () => {
+    const stable = await release("stable broken build", "v0.3.30", { failBuild: true });
+    const preview = await release("working preview", "v0.3.31-rc.1");
+    await updater.request({ channel: "rc" });
+    await updater.request("install");
+    expect(updater.status.current_revision).toBe(preview);
+    await updater.request({ channel: "stable" });
+    expect(updater.status.latest_revision).toBe(stable);
+    await updater.request("install");
+    expect(updater.status.phase).toBe("error");
+    expect(updater.status.current_revision).toBe(preview);
+    expect(updater.status.channel_switch_pending).toBe(true);
+  });
+
   it("cancels an update command with a deadline", async () => {
     const start = Date.now();
     await expect(runCommand(root, [process.execPath, "--eval", "setInterval(() => {}, 1000)"], undefined, 100)).rejects.toThrow("timed out");

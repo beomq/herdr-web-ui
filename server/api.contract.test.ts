@@ -51,13 +51,39 @@ describe("update API", () => {
     const protectedState = mkdtempSync(join(tmpdir(), "herdr-update-auth-"));
     const protectedServer = createServer({ port: 0, stateDir: protectedState, token: "test-update-token" });
     try {
-      for (const path of ["/api/updates", "/api/updates/check", "/api/updates/install"]) {
+      for (const path of ["/api/updates", "/api/updates/check", "/api/updates/install", "/api/updates/channel"]) {
         const response = await fetch(`http://localhost:${protectedServer.port}${path}`, {
           method: path === "/api/updates" ? "GET" : "POST", headers: { "x-herdr-update": "1" },
         });
         expect(response.status).toBe(401);
       }
     } finally { protectedServer.stop(); rmSync(protectedState, { recursive: true, force: true }); }
+  });
+});
+
+describe("update channel API", () => {
+  it("accepts only authenticated same-origin channel choices without installing", async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "herdr-channel-api-"));
+    const { unmanagedUpdateStatus } = await import("../shared/update.ts");
+    const commands: unknown[] = [];
+    const status = { ...unmanagedUpdateStatus(), managed: true, blocked_reason: null };
+    const instance = createServer({ port: 0, token: "channel-token", stateDir,
+      updates: { status: () => status, request: command => { commands.push(command); } } });
+    const url = `http://localhost:${instance.port}/api/updates/channel`;
+    const headers = { authorization: "Bearer channel-token", "x-herdr-update": "1", "content-type": "application/json" };
+    try {
+      expect((await fetch(url, { method: "POST", headers: { ...headers, "sec-fetch-site": "cross-site" }, body: '{"channel":"nightly"}' })).status).toBe(403);
+      for (const body of ["null", "[]", "{}", '{"channel":"dev"}', "broken"]) {
+        expect((await fetch(url, { method: "POST", headers, body })).status).toBe(400);
+      }
+      expect(commands).toEqual([]);
+      for (const channel of ["nightly", "rc", "stable"]) {
+        expect((await fetch(url, { method: "POST", headers, body: JSON.stringify({ channel }) })).status).toBe(202);
+      }
+      expect(commands).toEqual([{ channel: "nightly" }, { channel: "rc" }, { channel: "stable" }]);
+      status.phase = "building";
+      expect((await fetch(url, { method: "POST", headers, body: '{"channel":"rc"}' })).status).toBe(409);
+    } finally { instance.stop(); rmSync(stateDir, { recursive: true, force: true }); }
   });
 });
 

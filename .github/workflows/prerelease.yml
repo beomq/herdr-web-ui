@@ -1,11 +1,16 @@
-name: Release
-# Existing installs see stable tags immediately. Promote only a tested, observed RC commit.
+name: Preview release
 on:
+  schedule:
+    - cron: '17 18 * * *' # 03:17 KST; unchanged commits are skipped
   workflow_dispatch:
     inputs:
-      candidate:
-        description: Published RC tag with reviewed docs/releases/<tag>.json evidence
-        required: true
+      channel:
+        description: Preview channel
+        type: choice
+        options: [nightly, rc]
+        default: nightly
+      version:
+        description: RC only — base X.Y.Z already prepared in main
         type: string
 permissions:
   contents: read
@@ -16,6 +21,7 @@ jobs:
   preflight:
     runs-on: ubuntu-24.04
     outputs:
+      publish: ${{ steps.plan.outputs.publish }}
       revision: ${{ steps.plan.outputs.revision }}
     steps:
       - uses: actions/checkout@v4
@@ -25,18 +31,20 @@ jobs:
         with:
           bun-version: 1.4.2
       - id: plan
-        name: Require observed RC and exact commit
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_CANDIDATE: ${{ inputs.candidate }}
-        run: bun scripts/release.ts plan stable
+          RELEASE_CHANNEL: ${{ inputs.channel || 'nightly' }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: bun scripts/release.ts plan "$RELEASE_CHANNEL"
       - uses: actions/upload-artifact@v4
+        if: steps.plan.outputs.publish == 'true'
         with:
           name: release-plan
           path: evidence/release-plan/
           if-no-files-found: error
   validate:
     needs: preflight
+    if: needs.preflight.outputs.publish == 'true'
     uses: ./.github/workflows/ci.yml
     with:
       revision: ${{ needs.preflight.outputs.revision }}
@@ -55,7 +63,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: evidence/release-artifacts
-      - name: Publish the validated RC commit as Stable
+      - name: Publish the validated preview commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: bun scripts/release.ts publish evidence/release-artifacts/release-plan/plan.json evidence/release-artifacts

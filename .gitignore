@@ -17,3 +17,7 @@ _site/
 
 # film footage and renders, made by scripts/film/
 _film/
+
+# Isolated CI state (never real user state)
+.ci-config/
+.ci-state/

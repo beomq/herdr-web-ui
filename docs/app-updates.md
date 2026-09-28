@@ -8,7 +8,7 @@ Inspected `devswha/chatmux` at commit `3b1f3b49216157399e3fb9666a49c942908c3e32`
 
 | Priority | Adopted behavior | Implementation |
 | --- | --- | --- |
-| 1 | Automatic discovery, explicit install | Supervisor checks after 10 seconds/every 5 minutes for the highest plain `vX.Y.Z` tag (bundle `remote-v*` tags and pre-releases are ignored; annotated tags are peeled to their commit); Settings provides check/install controls |
+| 1 | Automatic discovery, explicit install | Supervisor checks after 10 seconds/every 5 minutes for the highest tag in the selected channel (Stable by default; bundle `remote-v*` tags are ignored and preview tags require opt-in; annotated tags are peeled to their commit); Settings provides check/install controls |
 | 2 | Protect locally modified or diverged source | Clean `main` checkout required (herdr's shallow, detached plugin checkout is accepted when running as that plugin); exact target SHA and ancestry verified; source worktree never rewritten |
 | 3 | Verify deployment and recover | Build isolated checkout, restart bridge, match a fresh boot ID through health, restore prior build on failure |
 | 4 | Optional unattended installation | `HERDR_WEB_AUTO_UPDATE=1`; persist failed SHA to prevent repeating a bad automatic deployment |
@@ -24,6 +24,16 @@ Chatmux's systemd-specific launcher and release archive pipeline were not adopte
 - `bun run start` and plugin `start` use the supervisor; `bun run server` remains unmanaged. Restart an older running server once to adopt this entrypoint. Updates replace the supervisor through the handover above; only the launcher (`server/managed.ts`, kept small and dependency-light) stays loaded from the source checkout, so a launcher change needs a restart from an updated checkout (plugin reinstall or `git pull`).
 - Update data is separate from push keys/subscriptions. State and socket paths are resolved before launching a candidate, so changing the candidate working directory cannot redirect either. The source checkout and the two most recent successful isolated builds remain available.
 - Discovery/build failures keep the serving bridge alive. A failed candidate boot restores the previous build. If both candidate and previous build cannot start (for example herdr is unavailable), the failure remains in supervisor logs and needs normal service recovery.
+
+## Channels and release policy
+
+See [the release runbook](releasing.md) for tag formats, RC observation gates and publication.
+Channel selection is server-wide, persisted in the updater's private `channel.json`, and
+pauses automatic installation until explicit install. The current build's tag is recorded
+in `current.json` (older records without a tag remain supported). Only a known preview may
+return to an ancestor release after an explicit channel switch; unrelated histories and
+tags outside upstream main are rejected. A corrupt channel preference blocks unattended
+updates. The API accepts only the three channel names, behind the existing auth/CSRF guard.
 
 ## Verification
 

@@ -12,7 +12,7 @@ import type { UpdateStatus } from "../shared/update.ts";
 const source = resolve(import.meta.dir, "..");
 const temp = mkdtempSync(join(tmpdir(), "herdr-update-browser-"));
 const upstream = join(temp, "upstream"), install = join(temp, "install");
-const evidence = join(source, "evidence", "updates");
+const evidence = process.env.UPDATE_EVIDENCE_DIR || join(source, "evidence", "updates");
 mkdirSync(upstream); mkdirSync(evidence, { recursive: true });
 const git = (cwd: string, ...args: string[]) => runCommand(cwd, ["git", ...args]);
 let supervisor: ReturnType<typeof Bun.spawn> | undefined;
@@ -29,10 +29,19 @@ async function until(check: () => Promise<boolean>, message: string) {
 }
 
 try {
-  const files = await git(source, "ls-files", "--cached", "--others", "--exclude-standard", "-z");
-  for (const file of new Set(files.split("\0").filter(Boolean))) {
-    mkdirSync(dirname(join(upstream, file)), { recursive: true });
-    copyFileSync(join(source, file), join(upstream, file));
+  // Exercise a real previously released frontend, storage and launcher before upgrading.
+  const baseline = process.env.UPGRADE_BASE_REF || "v0.3.29";
+  if (!/^v\d+\.\d+\.\d+$/.test(baseline)) throw new Error("UPGRADE_BASE_REF must be a stable tag");
+  const archive = Bun.spawn(["git", "archive", baseline], { cwd: source, stdout: "pipe", stderr: "inherit" });
+  const extract = Bun.spawn(["tar", "-x", "-C", upstream], { stdin: archive.stdout, stdout: "ignore", stderr: "inherit" });
+  assert.equal(await archive.exited, 0); assert.equal(await extract.exited, 0);
+  async function copyCandidate() {
+    for (const file of (await git(upstream, "ls-files", "-z")).split("\0").filter(Boolean)) rmSync(join(upstream, file), { force: true });
+    const files = await git(source, "ls-files", "--cached", "--others", "--exclude-standard", "-z");
+    for (const file of new Set(files.split("\0").filter(Boolean))) {
+      mkdirSync(dirname(join(upstream, file)), { recursive: true });
+      copyFileSync(join(source, file), join(upstream, file));
+    }
   }
   await git(upstream, "init", "-q", "-b", "main");
   await git(upstream, "config", "user.name", "Update browser QA");
@@ -62,12 +71,29 @@ try {
   page.on("pageerror", error => errors.push(error.message));
   page.setDefaultTimeout(60_000);
   await page.goto(`${origin}/?pane=${encodeURIComponent(paneId)}`);
+  await page.evaluate(async (id) => {
+    await navigator.serviceWorker.ready;
+    localStorage.setItem("herdr-web-ui:settings", JSON.stringify({ theme: "light", density: "compact", language: "en" }));
+    localStorage.setItem(`herdr-web-ui:view:${id}`, "chat");
+    localStorage.setItem(`herdr-web-ui:queue:${id}`, JSON.stringify({ version: 1, messages: [
+      { id: "qa-one", text: "Held before upgrade one" }, { id: "qa-two", text: "Held before upgrade two" },
+    ] }));
+  }, paneId);
+  await page.reload();
+  await page.waitForFunction(() => !!navigator.serviceWorker.controller);
+  const preservedStorage = await page.evaluate(id => ({ settings: localStorage.getItem("herdr-web-ui:settings"), queue: localStorage.getItem(`herdr-web-ui:queue:${id}`) }), paneId);
+  let sends = 0;
+  page.on("websocket", socket => socket.on("framesent", ({ payload }) => {
+    const message = JSON.parse(String(payload));
+    if (message.type === "input" || message.type === "submit") sends++;
+  }));
   await page.getByRole("button", { name: "Chat", exact: true }).click();
   const draft = page.getByRole("textbox", { name: "Message", exact: true });
   await draft.fill("Unsent draft preserved across update");
   await page.locator(".sidebar-footer").getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("heading", { name: "Updates", exact: true }).scrollIntoViewIfNeeded();
 
+  await copyCandidate();
   writeFileSync(join(upstream, "qa-revision.txt"), "second build\n");
   await git(upstream, "add", "."); await git(upstream, "commit", "-qm", "QA update"); await git(upstream, "tag", "v99.0.0");
   const next = await git(upstream, "rev-parse", "HEAD");
@@ -91,8 +117,44 @@ try {
   await page.getByText(new RegExp(`^Running (v[0-9.]+ \\()?${next.slice(0, 12)}\\)?$`)).waitFor();
   assert.equal(await page.locator(".update-notice").count(), 0);
 
+  const assertStored = async () => {
+    assert.deepEqual(await page.evaluate(id => ({ settings: localStorage.getItem("herdr-web-ui:settings"), queue: localStorage.getItem(`herdr-web-ui:queue:${id}`) }), paneId), preservedStorage);
+    assert.equal(await page.locator("html").getAttribute("data-theme"), "light");
+    assert.equal(await page.locator("html").getAttribute("data-density"), "compact");
+    assert.equal(sends, 0, "updates/reloads must never send held messages");
+  };
+  await assertStored();
+  assert.equal((await status())?.channel, "stable");
+  const channel = page.getByRole("combobox", { name: "Update channel", exact: true });
+  writeFileSync(join(upstream, "qa-revision.txt"), "nightly build\n");
+  await git(upstream, "add", "."); await git(upstream, "commit", "-qm", "QA nightly");
+  const nightly = await git(upstream, "rev-parse", "HEAD");
+  await git(upstream, "tag", `v99.0.1-nightly.20260928120000.1.${nightly.slice(0, 12)}`);
+  await page.getByRole("button", { name: "Check for updates", exact: true }).click();
+  await until(async () => (await status())?.phase === "idle", "Stable check finishes");
+  assert.equal((await status())?.current_revision, next);
+  assert.equal((await status())?.available, false);
+  await channel.selectOption("nightly");
+  await until(async () => (await status())?.channel === "nightly" && await installButton.isEnabled(), "Nightly selection offers explicit install");
+  assert.equal((await status())?.current_revision, next);
+  await page.screenshot({ path: join(evidence, "nightly-opt-in.png"), fullPage: true });
+  await installButton.click();
+  await until(async () => { const value = await status(); return value?.current_revision === nightly && value.phase === "idle"; }, "Nightly handover");
+  await page.reload();
+  await page.locator(".sidebar-footer").getByRole("button", { name: "Settings", exact: true }).click();
+  await channel.selectOption("stable");
+  const returnButton = page.getByRole("button", { name: "Return and restart", exact: true });
+  await until(() => returnButton.isEnabled(), "Explicit Stable return");
+  assert.equal((await status())?.current_revision, nightly);
+  await returnButton.click();
+  await until(async () => { const value = await status(); return value?.current_revision === next && value.phase === "idle"; }, "Stable return handover");
+  await page.reload();
+  await page.locator(".sidebar-footer").getByRole("button", { name: "Settings", exact: true }).click();
+  await assertStored();
+  console.log(`PASS ${baseline} → candidate with controlled PWA, settings and held queue; Nightly opt-in and explicit Stable return`);
+
   writeFileSync(join(upstream, "server/index.ts"), `throw new Error('QA startup failure');\n${readFileSync(join(upstream, "server/index.ts"), "utf8")}`);
-  await git(upstream, "add", "."); await git(upstream, "commit", "-qm", "QA failed startup"); await git(upstream, "tag", "v99.0.1");
+  await git(upstream, "add", "."); await git(upstream, "commit", "-qm", "QA failed startup"); await git(upstream, "tag", "v99.0.2");
   await page.getByRole("button", { name: "Check for updates", exact: true }).click();
   await until(() => installButton.isEnabled(), "Rollback candidate never became available");
   await installButton.click();

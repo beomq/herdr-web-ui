@@ -29,8 +29,10 @@ export function fetchUpdateStatus(): Promise<UpdateStatus> {
 }
 
 export async function requestUpdate(command: UpdateCommand): Promise<void> {
-  const url = `/api/updates/${command}`;
-  const response = await fetch(url, { method: "POST", headers: { "x-herdr-update": "1" } });
+  const selecting = typeof command === "object";
+  const url = `/api/updates/${selecting ? "channel" : command}`;
+  const response = await fetch(url, { method: "POST", headers: { "x-herdr-update": "1", "content-type": "application/json" },
+    ...(selecting ? { body: JSON.stringify(command) } : {}) });
   if (!response.ok) throw await errorFrom(url, response);
 }
 
