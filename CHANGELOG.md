@@ -18,6 +18,9 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
   Sign-in locations and endpoints follow OpenUsage.
 
 ### Changed
+- The app shell fills a fixed, opaque viewport instead of fixing only the header,
+  as a workaround for the iOS home-screen app's header blur (#164). It keeps the
+  visual-viewport height used for the keyboard; iOS 27 confirmation is pending.
 - The website is redesigned after herdr.dev: ink and paper modes, one large headline with the
   install line, a strip of figures, and five numbered rows for what the app does. It is built
   from the README's own media: its top video, with a tab that swaps it for the demo app, its

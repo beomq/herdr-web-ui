@@ -441,6 +441,41 @@ try {
     if (process.env.UI_EVIDENCE_DIR) await mobilePage.screenshot({ path: join(process.env.UI_EVIDENCE_DIR, `report-mobile-${theme}.png`) });
   }
   await mobileReport.getByRole("button", { name: "Close", exact: true }).click();
+
+  // The shell follows viewport changes without moving its header or clipping the input.
+  // These are layout checks; Chromium cannot reproduce iOS's native scroll-edge blur.
+  for (const viewport of [
+    { width: 844, height: 390 },
+    { width: 390, height: 420 },
+    { width: 1024, height: 768 },
+    { width: 390, height: 844 },
+  ]) {
+    await mobilePage.setViewportSize(viewport);
+    await mobilePage.waitForFunction(() => {
+      const app = document.querySelector(".app")!.getBoundingClientRect();
+      return Math.abs(app.height - window.visualViewport!.height) <= 1;
+    });
+    const bounds = await mobilePage.evaluate(() => ({
+      width: window.visualViewport!.width,
+      height: window.visualViewport!.height,
+      header: document.querySelector(".app-header")!.getBoundingClientRect().toJSON(),
+      input: document.querySelector(".composer textarea")!.getBoundingClientRect().toJSON(),
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    assert.equal(bounds.header.top, 0, "header stays at the top after a viewport change");
+    assert.ok(bounds.header.right <= bounds.width + 1, "header fits the viewport width");
+    assert.ok(bounds.input.top >= bounds.header.bottom, "composer stays below the header");
+    assert.ok(bounds.input.bottom <= bounds.height + 1, "composer stays inside the visual viewport");
+    assert.ok(bounds.scrollWidth <= bounds.width + 1, "viewport changes do not create horizontal page scroll");
+  }
+  await mobilePage.getByRole("button", { name: "Open workspace list", exact: true }).click();
+  await mobilePage.locator(".sidebar.is-open").waitFor();
+  await mobilePage.waitForFunction(() => document.querySelector(".sidebar")!.getBoundingClientRect().left >= -1);
+  await mobilePage.getByRole("button", { name: "Close workspace list", exact: true }).click();
+  await mobilePage.locator(".sidebar.is-open").waitFor({ state: "hidden" });
+  await mobilePage.waitForFunction(() => getComputedStyle(document.querySelector(".sidebar")!).visibility === "hidden");
+  if (process.env.UI_EVIDENCE_DIR) await mobilePage.screenshot({ path: join(process.env.UI_EVIDENCE_DIR, "shell-mobile.png") });
+  console.log("PASS shell header and composer survive viewport changes and drawer toggling");
   assert.deepEqual(errors, []);
   console.log("PASS mobile composer with unavailable storage and no horizontal overflow");
 
