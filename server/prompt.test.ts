@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { createServer, type Socket } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { InteractivePrompt } from "../shared/protocol.ts";
 
-import { answerKeys, codexQuestionsCollapsed, codexQueuedPrompt, parseClaudeSuggestion, parseFallbackPrompt, parseInteractivePrompt } from "./prompt.ts";
+import { answerKeys, codexQuestionsCollapsed, codexQueuedPrompt, handlePromptRequest, parseClaudeSuggestion, parseFallbackPrompt, parseInteractivePrompt } from "./prompt.ts";
 
 const labels = (prompt: InteractivePrompt | null) => prompt?.options.map((option) => option.label);
 
@@ -989,4 +993,67 @@ describe("the fallback card for a blocked pane no reader knows", () => {
     const footer = (end: string) => `Pick\n\n❯ 1. One\n  2. Two\n\n ${end}\n`;
     expect(parseFallbackPrompt("gjc", footer("Enter to select")).id).not.toBe(parseFallbackPrompt("gjc", footer("Enter to select · done")).id);
   });
+});
+
+describe("Claude's suggestion on a prompt poll", () => {
+  /** a herdr with one Claude pane whose ANSI reads never answer */
+  async function stalledAnsiHerdr(status: string, run: (reads: string[]) => Promise<void>): Promise<void> {
+    const root = mkdtempSync(join(tmpdir(), "herdr-prompt-suggestion-"));
+    const path = join(root, "herdr.sock");
+    const reads: string[] = [];
+    const sockets = new Set<Socket>();
+    const server = createServer((socket) => {
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
+      socket.on("error", () => undefined);
+      let input = "";
+      socket.on("data", (chunk) => {
+        input += chunk.toString();
+        if (!input.includes("\n")) return;
+        const request = JSON.parse(input.split("\n")[0]!) as { id: string; method: string; params: { format?: string } };
+        const answer = (result: unknown) => socket.end(`${JSON.stringify({ id: request.id, result })}\n`);
+        if (request.method === "session.snapshot") {
+          return answer({ snapshot: { panes: [{ pane_id: "p_1", agent: "claude", agent_status: status }], layouts: [] } });
+        }
+        if (request.method !== "pane.read") throw new Error(`unexpected fixture RPC: ${request.method}`);
+        reads.push(request.params.format ?? "");
+        if (request.params.format === "text") answer({ read: { text: "Done.\n\n────────\n❯ \n────────\n" } });
+      });
+    });
+    await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(path, resolve); });
+    const previous = process.env["HERDR_SOCKET"];
+    process.env["HERDR_SOCKET"] = path;
+    try { await run(reads); } finally {
+      if (previous === undefined) delete process.env["HERDR_SOCKET"];
+      else process.env["HERDR_SOCKET"] = previous;
+      for (const socket of sockets) socket.destroy();
+      server.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  async function poll(): Promise<{ body: unknown; ms: number }> {
+    const url = new URL("http://127.0.0.1/api/pane/prompt?pane_id=p_1");
+    const started = Date.now();
+    const response = await handlePromptRequest(new Request(url), url);
+    return { body: await response!.json(), ms: Date.now() - started };
+  }
+
+  test("answers without it once its read is late, rather than waiting on herdr", async () => {
+    await stalledAnsiHerdr("idle", async (reads) => {
+      const { body, ms } = await poll();
+      expect(body).toEqual({ prompt: null, suggestion: null });
+      expect(reads).toEqual(["text", "ansi"]);
+      expect(ms).toBeLessThan(2_500);
+    });
+  }, 4_000);
+
+  test("is not read while Claude works", async () => {
+    await stalledAnsiHerdr("working", async (reads) => {
+      const { body, ms } = await poll();
+      expect(body).toEqual({ prompt: null, suggestion: null });
+      expect(reads).toEqual(["text"]);
+      expect(ms).toBeLessThan(1_000);
+    });
+  }, 4_000);
 });

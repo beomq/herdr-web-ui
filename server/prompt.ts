@@ -907,6 +907,9 @@ const queueFronts = new Map<string, QueueFront & { rollout: string }>();
 const queueRollouts = new Map<string, { path: string | null; at: number }>();
 const QUEUE_ROLLOUT_MS = 15_000;
 
+/** how long a prompt poll waits for the ANSI read behind Claude's suggestion before going without it */
+const SUGGESTION_READ_MS = 1_500;
+
 /** Claude's new-session tip in the empty input (`Try "how does <filepath> work?"`), not a suggestion. */
 const CLAUDE_TIP_RE = /^Try "/;
 
@@ -973,31 +976,32 @@ export function parseClaudeSuggestion(ansi: string): string | null {
   return suggestion === "" || CLAUDE_TIP_RE.test(suggestion) ? null : suggestion;
 }
 
-async function readPrompt(paneId: string, codexHome?: string): Promise<{ agent: string; prompt: InteractivePrompt | null }> {
+async function readPrompt(paneId: string, codexHome?: string): Promise<{ agent: string; status: string; prompt: InteractivePrompt | null }> {
   const { panes } = await sessionSnapshot();
   // a closed pane's wait has ended too
   for (const logged of fallbackLogged) if (!panes.some((candidate) => candidate.pane_id === logged)) fallbackLogged.delete(logged);
   const pane = panes.find((candidate) => candidate.pane_id === paneId);
   if (!pane) throw new HerdrError("pane_not_found", `pane ${paneId} not found`);
   const agent = pane.agent ?? "";
+  const status = pane.agent_status;
   const known = await readKnownPrompt(paneId, pane, agent, codexHome);
-  if (known.prompt !== null || pane.agent_status !== "blocked" || !agent) {
+  if (known.prompt !== null || status !== "blocked" || !agent) {
     fallbackLogged.delete(paneId);
-    return { agent, prompt: known.prompt };
+    return { agent, status, prompt: known.prompt };
   }
   // herdr says the agent waits on the user and no reader knows the screen: the fallback card
   const screen = known.screen ?? (await paneRead({ paneId, source: "visible", format: "text" })).text;
   // Codex's collapsed question queue reads blocked while its main prompt takes a message
   if (agent === "codex" && codexQuestionsCollapsed(screen)) {
     fallbackLogged.delete(paneId);
-    return { agent, prompt: null };
+    return { agent, status, prompt: null };
   }
   const prompt = parseFallbackPrompt(agent, screen);
   if (!fallbackLogged.has(paneId) && fallbackLogged.size < FALLBACK_LOGGED_MAX) {
     fallbackLogged.add(paneId);
     console.warn(`prompt: ${agent} pane ${paneId} is blocked on a screen no reader knows; fallback card (${prompt.options.length} options)`);
   }
-  return { agent, prompt };
+  return { agent, status, prompt };
 }
 
 async function readKnownPrompt(
@@ -1128,11 +1132,14 @@ export async function handlePromptRequest(request: Request, url: URL, options: P
       if (request.method !== "GET") return badRequest("method_not_allowed", "GET is required.");
       const paneId = url.searchParams.get("pane_id")?.trim();
       if (!paneId) return badRequest("missing_pane_id", "pane_id is required.");
-      const { agent, prompt } = await readPrompt(paneId, options.codexHome);
+      const { agent, status, prompt } = await readPrompt(paneId, options.codexHome);
       // no menu up: what Claude suggests typing next, for the composer's placeholder. Only a
-      // nicety: a failed read of it (a herdr without ansi reads) leaves the prompt answer as it is.
-      const suggestion = prompt === null && agent === "claude"
-        ? await paneRead({ paneId, source: "visible", format: "ansi" }).then((read) => parseClaudeSuggestion(read.text), () => null)
+      // nicety: it is read only while Claude waits for the next prompt (a working agent shows
+      // none), and a failed or slow read of it (a herdr without ansi reads, a busy one) leaves
+      // the prompt answer as it is, on time.
+      const suggestion = prompt === null && agent === "claude" && (status === "idle" || status === "done")
+        ? await paneRead({ paneId, source: "visible", format: "ansi", timeoutMs: SUGGESTION_READ_MS })
+          .then((read) => parseClaudeSuggestion(read.text), () => null)
         : null;
       return jsonResponse({ prompt, suggestion });
     }
