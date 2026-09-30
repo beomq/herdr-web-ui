@@ -771,8 +771,8 @@ export function answerKeys(prompt: InteractivePrompt, answer: Pick<PromptAnswer,
  * menu a new agent version draws differently, an agent without a reader): the chat must never
  * leave the user without a way to answer. It guesses as little as it can. Only a numbered menu
  * that still owns the screen's end becomes options, each answered by typing its number, so no
- * cursor position is guessed. Anything else shows the screen's last lines with the keys its
- * hint lines name, plus Enter and Esc.
+ * cursor position is guessed, plus Enter and Esc. Anything else shows the screen's last lines
+ * with the keys its hint lines name, plus Enter and Esc.
  */
 /** a question, allowing a trailing choice hint such as "(y/n)" */
 const ASKED_RE = /\?\s*(?:[([][^)\]]*[)\]])?\s*$/;
@@ -783,8 +783,6 @@ const ARROWS_RE = /[↑↓]|\barrow keys\b/i;
 const MENU_HINT_RE = /\b(?:enter|select|choose|pick|number|esc)\b/i;
 /** a line that is an input box or quoted output rather than a prompt's own text */
 const NOT_PROMPT_TEXT_RE = /^(?:[❯›>"'“]|\$ )/;
-/** what may follow a menu that still takes the answer: its hint lines, never a new prompt */
-const MENU_TAIL_LINES = 3;
 
 export function parseFallbackPrompt(agent: string, screen: string): InteractivePrompt {
   const lines = screen.replace(ANSI_RE, "").split(/\r?\n/);
@@ -793,17 +791,24 @@ export function parseFallbackPrompt(agent: string, screen: string): InteractiveP
   if (menu) {
     const above = shown.filter((index) => index < menu.start).map((index) => cleanLine(lines[index]!));
     const question = [...above].reverse().find((line) => ASKED_RE.test(line)) ?? above.at(-1);
+    // a row's number is typed alone, as a menu reading keys takes it; a program reading a whole
+    // line ("Enter a number >") still waits for the Enter after it, and Esc backs out
+    const choices: { label: string; steps: AnswerStep[] }[] = [
+      ...menu.rows.map((row) => ({ label: row.label, steps: [{ text: String(row.number) }] })),
+      { label: "Enter", steps: keySteps([KEY.enter]) },
+      { label: "Esc", steps: keySteps([KEY.escape]) },
+    ];
     return screenCard(lines, shown, finishPrompt(agent, {
       // the body is every other line above the rows, so a changed command above a same-looking
       // menu is another card; the display cap applies after the hash
       kind: "menu", fallback: true, title: "Waiting for your answer", question: question ?? "The agent is waiting for your answer.",
       body: withoutLine(above, question),
-      options: menu.rows.map((row) => ({ label: row.label, description: null })),
+      options: choices.map(({ label }) => ({ label, description: null })),
       multi_select: false, custom_option_index: null,
     }, {
-      responder: "fallback-menu", menuLabels: menu.rows.map((row) => row.label), selectedIndex: 0,
+      responder: "fallback-menu", menuLabels: choices.map(({ label }) => label), selectedIndex: 0,
       checkedOptionIndices: [], customMenuIndex: null, rejectWithEscapeIndex: null,
-      optionSteps: menu.rows.map((row) => [{ text: String(row.number) }]),
+      optionSteps: choices.map(({ steps }) => steps),
     }));
   }
   const last = shown.slice(-16).map((index) => cleanLine(lines[index]!));
@@ -849,28 +854,34 @@ function withoutLine(lines: string[], question: string | undefined): string | nu
 }
 
 /**
- * A numbered menu (`1.` … `n.`, 2 to 9 rows, at most one marked) whose last row is followed only
- * by a few hint lines: nothing that reads as a new prompt, an input box or another numbered row.
+ * A numbered menu (`1.` … `n.`, 2 to 9 rows, at most one marked) that still owns the screen's
+ * end: under its last row only the lines that row wraps onto (right under it, indented past its
+ * number), then one hint line that says to choose, the screen's last. Anything else there (a
+ * second hint, a new prompt, an input box) may be what takes the keys now, so it is no menu.
  * A wrapped label is no guess here, since every row starts with its own number.
  */
 function fallbackMenu(lines: string[], shown: number[]): { start: number; rows: NumberedRow[] } | null {
   const lastRow = [...shown].reverse().find((index) => NUMBERED_OPTION_RE.test(cleanLine(lines[index]!)));
   if (lastRow === undefined) return null;
-  const after = shown.filter((index) => index > lastRow).map((index) => cleanLine(lines[index]!));
-  if (after.length > MENU_TAIL_LINES || after.some((line) => SELECTED_RE.test(line) || NUMBERED_OPTION_RE.test(line))) return null;
-  // a hint that says to choose, and no input field after it ("Password:", "Choice: 2"): a
-  // numbered list in the agent's output is not a menu
-  if (!after.some((line) => MENU_HINT_RE.test(line)) || /:\s*\S{0,3}$/.test(after.at(-1)!)) return null;
+  let end = lastRow + 1;
+  const numberAt = lines[lastRow]!.search(/\d/);
+  while (end < lines.length && cleanLine(lines[end]!) && !isDivider(lines[end]!) && lines[end]!.search(/\S/) > numberAt) end += 1;
+  const after = shown.filter((index) => index >= end).map((index) => cleanLine(lines[index]!));
+  if (after.length !== 1) return null;
+  const hint = after[0]!;
+  // a hint that says to choose, and no input field ("Password:", "Choice: 2"): a numbered
+  // list in the agent's output is not a menu
+  if (!MENU_HINT_RE.test(hint) || SELECTED_RE.test(hint) || NOT_PROMPT_TEXT_RE.test(hint) || /:\s*\S{0,3}$/.test(hint)) return null;
   // up from the last row, through rows and the lines they wrap onto, to a blank line or a rule
   let start = lastRow;
   while (start > 0 && cleanLine(lines[start - 1]!) && !isDivider(lines[start - 1]!)) start -= 1;
   while (start < lastRow && !NUMBERED_OPTION_RE.test(cleanLine(lines[start]!))) start += 1;
-  const rows = parseNumberedRows(lines, start, lastRow + 1);
+  const rows = parseNumberedRows(lines, start, end);
   if (!sequentialRows(rows) || rows.length < 2 || rows.length > 9 || rows.filter((row) => row.selected).length > 1) return null;
   // the lines a row wraps onto belong to its label; an input box or quote between rows, or a
   // row with its own letter key ("Read only (r)"), means the number may not be the key
   for (const [at, row] of rows.entries()) {
-    const wrapped = lines.slice(row.lineIndex + 1, rows[at + 1]?.lineIndex ?? lastRow + 1).map(cleanLine).filter(Boolean);
+    const wrapped = lines.slice(row.lineIndex + 1, rows[at + 1]?.lineIndex ?? end).map(cleanLine).filter(Boolean);
     if (wrapped.some((line) => NOT_PROMPT_TEXT_RE.test(line))) return null;
     row.label = [row.label, ...wrapped].join(" ");
     if (/\(\w\)$/.test(row.label)) return null;

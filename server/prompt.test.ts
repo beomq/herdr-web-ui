@@ -878,15 +878,44 @@ describe("the fallback card for a blocked pane no reader knows", () => {
     expect(prompt.fallback).toBe(true);
     expect(prompt.question).toBe("Apply these 3 file changes?");
     expect(prompt.body).toBe("src/a.ts, src/b.ts, src/c.ts");
-    expect(labels(prompt)).toEqual(["Apply all", "Review each", "Discard"]);
+    expect(labels(prompt)).toEqual(["Apply all", "Review each", "Discard", "Enter", "Esc"]);
     expect(answerKeys(prompt, { option_index: 2 })).toEqual([{ text: "3" }]);
     expect(answerKeys(prompt, { option_index: 0 })).toEqual([{ text: "1" }]);
     expect(() => answerKeys(prompt, { custom_text: "no" })).toThrow();
   });
 
+  test("offers Enter and Esc after the rows, for a program that reads a whole line", () => {
+    const prompt = parseFallbackPrompt("gjc", "Pick a profile:\n1. Work\n2. Home\n\nEnter a number >\n");
+    expect(labels(prompt)).toEqual(["Work", "Home", "Enter", "Esc"]);
+    // the number goes alone; the Enter that submits it is its own tap
+    expect(answerKeys(prompt, { option_index: 1 })).toEqual([{ text: "2" }]);
+    expect(answerKeys(prompt, { option_index: 2 })).toEqual([{ keys: ["enter"] }]);
+    expect(answerKeys(prompt, { option_index: 3 })).toEqual([{ keys: ["esc"] }]);
+  });
+
+  test("joins the lines the last row wraps onto into its label", () => {
+    const prompt = parseFallbackPrompt("gjc", "Trust this folder?\n\n❯ 1. No, exit\n  2. Yes, trust folder and\n     allow all commands without asking\n\n Enter to confirm\n");
+    expect(labels(prompt)).toEqual(["No, exit", "Yes, trust folder and allow all commands without asking", "Enter", "Esc"]);
+  });
+
+  test("reads no menu when the last row's wrapped label ends in its own letter key", () => {
+    const prompt = parseFallbackPrompt("gjc", "Access?\n1. Read only\n2. Full access, every file and\n   command (f)\n\nEnter to select\n");
+    expect(labels(prompt)).toEqual(["Enter", "Esc"]);
+  });
+
+  test("reads no menu unless its hint is the screen's last line, with only the last row's wrap above it", () => {
+    // a new prompt under the hint takes what is typed now: a digit there is no menu answer
+    expect(labels(parseFallbackPrompt("gjc", "Pick:\n1. Read only\n2. Full access\nEnter to select\nEnter recovery code ABCD\n"))).toEqual(["Enter", "Esc"]);
+    expect(labels(parseFallbackPrompt("gjc", "Pick:\n1. Read only\n2. Full access\n\nEnter to select\nWaiting for the token\n"))).toEqual(["Enter", "Esc"]);
+    // a line under the last row, not indented past its number, is not its wrap
+    expect(labels(parseFallbackPrompt("gjc", "Pick:\n  1. Read only\n  2. Full access\n  Saved.\nEnter to select\n"))).toEqual(["Enter", "Esc"]);
+    // the last row's wrap alone is no hint
+    expect(labels(parseFallbackPrompt("gjc", "Pick:\n1. Read only\n2. Full access and\n   select all\n"))).toEqual(["Enter", "Esc"]);
+  });
+
   test("keeps a wrapped label on its own row, since each row starts with its number", () => {
     const prompt = parseFallbackPrompt("gjc", "Trust this folder?\n\n❯ 1. No, exit and keep this folder\n     untrusted\n  2. Yes, trust folder\n  3. Yes, trust and allow hooks\n\n Enter to confirm\n");
-    expect(labels(prompt)).toEqual(["No, exit and keep this folder untrusted", "Yes, trust folder", "Yes, trust and allow hooks"]);
+    expect(labels(prompt)).toEqual(["No, exit and keep this folder untrusted", "Yes, trust folder", "Yes, trust and allow hooks", "Enter", "Esc"]);
     expect(answerKeys(prompt, { option_index: 1 })).toEqual([{ text: "2" }]);
   });
 
