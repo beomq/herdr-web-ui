@@ -781,6 +781,12 @@ const YES_NO_RE = /[([]\s*y(?:es)?\s*\/\s*n(?:o)?\s*[)\]]\s*[:?]?\s*$/i;
 const ARROWS_RE = /[↑↓]|\barrow keys\b/i;
 /** what a menu's hint lines say to do with it */
 const MENU_HINT_RE = /\b(?:enter|select|choose|pick|number|esc)\b/i;
+/** an input field waiting at a line's end ("Password:", "Choice: 2") */
+const INPUT_FIELD_RE = /:\s*\S{0,3}$/;
+/** a line that reads as a hint of its own, not a label's wrapped words ("…the selected number") */
+const HINT_LINE_RE = /^(?:[↵⏎]|(?:press|enter|select|choose|pick|type|esc)\b)/i;
+/** how many lines the last row of a menu wraps onto, at most: more reads as output under it */
+const MENU_WRAP_LINES = 2;
 /** a line that is an input box or quoted output rather than a prompt's own text */
 const NOT_PROMPT_TEXT_RE = /^(?:[❯›>"'“]|\$ )/;
 
@@ -867,11 +873,11 @@ function fallbackMenu(lines: string[], shown: number[]): { start: number; rows: 
   const hint = cleanLine(lines[hintIndex]!);
   // a hint that says to choose, and no input field ("Password:", "Choice: 2"): a numbered
   // list in the agent's output is not a menu
-  if (!MENU_HINT_RE.test(hint) || SELECTED_RE.test(hint) || NOT_PROMPT_TEXT_RE.test(hint) || /:\s*\S{0,3}$/.test(hint)) return null;
+  if (!MENU_HINT_RE.test(hint) || SELECTED_RE.test(hint) || NOT_PROMPT_TEXT_RE.test(hint) || INPUT_FIELD_RE.test(hint)) return null;
   let end = lastRow + 1;
   const numberAt = lines[lastRow]!.search(/\d/);
   while (end < hintIndex && cleanLine(lines[end]!) && !isDivider(lines[end]!) && lines[end]!.search(/\S/) > numberAt) end += 1;
-  if (shown.some((index) => index >= end && index < hintIndex)) return null;
+  if (shown.some((index) => index >= end && index < hintIndex) || end - lastRow - 1 > MENU_WRAP_LINES) return null;
   // up from the last row, through rows and the lines they wrap onto, to a blank line or a rule
   let start = lastRow;
   while (start > 0 && cleanLine(lines[start - 1]!) && !isDivider(lines[start - 1]!)) start -= 1;
@@ -882,8 +888,8 @@ function fallbackMenu(lines: string[], shown: number[]): { start: number; rows: 
   // row with its own letter key ("Read only (r)"), means the number may not be the key
   for (const [at, row] of rows.entries()) {
     const wrapped = lines.slice(row.lineIndex + 1, rows[at + 1]?.lineIndex ?? end).map(cleanLine).filter(Boolean);
-    // a hint inside the last row's wrap may be an older one, with a new prompt under it
-    if (wrapped.some((line) => NOT_PROMPT_TEXT_RE.test(line) || (at === rows.length - 1 && MENU_HINT_RE.test(line)))) return null;
+    // a hint or an input field inside the last row's wrap may be an older prompt, with a new one under it
+    if (wrapped.some((line) => NOT_PROMPT_TEXT_RE.test(line) || (at === rows.length - 1 && (HINT_LINE_RE.test(line) || INPUT_FIELD_RE.test(line))))) return null;
     // the key may end the row's first line, with a description wrapped under it
     if ([row.label, ...wrapped].some((line) => /\(\w\)$/.test(line))) return null;
     row.label = [row.label, ...wrapped].join(" ");
