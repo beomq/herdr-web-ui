@@ -782,9 +782,9 @@ const ARROWS_RE = /[↑↓]|\barrow keys\b/i;
 /**
  * what a menu's hint line says to do with it: a way to choose ("Enter to select", "↵ choose",
  * "Enter a number", "Type 1-3", "↑/↓ to move"). A plain Enter or Press asks for something else
- * ("Enter recovery code", "Press any key").
+ * ("Enter recovery code", "Enter your phone number", "Press any key").
  */
-const MENU_HINT_RE = /\b(?:select|choose|pick|confirm|navigate|move|esc|cancel|number)\b|[↑↓↵⏎]|\b\d\s*[-–]\s*\d\b/i;
+const MENU_HINT_RE = /\b(?:select|choose|pick|confirm|navigate|move|esc|cancel)\b|[↑↓↵⏎]|\b(?:enter|type)\s+(?:(?:a|an|the)\s+)?number\b|\b\d\s*[-–]\s*\d\b/i;
 /** an input field waiting at a line's end ("Password:", "Choice: 2") */
 const INPUT_FIELD_RE = /:\s*\S{0,3}$/;
 /** a line that reads as a hint of its own, not a label's wrapped words ("…the selected number", "choose one") */

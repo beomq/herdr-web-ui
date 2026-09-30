@@ -912,7 +912,7 @@ describe("the fallback card for a blocked pane no reader knows", () => {
   test("takes the last line for a hint only when it names a way to choose", () => {
     const menu = (hint: string) => labels(parseFallbackPrompt("gjc", `Pick one:\n1. Alpha\n2. Beta\n\n${hint}\n`));
     // a plain Enter or Press asks for something else: a digit typed there is no answer
-    for (const hint of ["Enter recovery code", "Enter your password", "Press any key", "Enter to continue"]) {
+    for (const hint of ["Enter recovery code", "Enter your password", "Enter your phone number", "Press any key", "Enter to continue"]) {
       expect(menu(hint)).toEqual(["Enter", "Esc"]);
     }
     expect(labels(parseFallbackPrompt("gjc", "1. A\n2. B\nEnter recovery code\n"))).toEqual(["Enter", "Esc"]);
