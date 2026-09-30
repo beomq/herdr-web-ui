@@ -35,7 +35,7 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
   ([#210](https://github.com/devswha/herdr-web-ui/pull/210) by @Yoonwoo-Ha, [#216](https://github.com/devswha/herdr-web-ui/pull/216)).
 - A pane herdr reports waiting for input gets a card in the chat even when no reader knows its
   screen (Codex's collapsed question queue keeps its own handling). A numbered menu whose hint
-  is the screen's last line is offered as its options, each answered by typing its number, with
+  (a way to choose, such as "Enter to select") is the screen's last line is offered as its options, each answered by typing its number, with
   wrapped labels in full and Enter and Esc after them; anything else, such as a new prompt under
   the hint, shows the screen's last lines with Enter and Esc, plus Yes and No for a `(y/n)` prompt
   and arrows when its hint names them. An answer to a changed screen is refused. Each such

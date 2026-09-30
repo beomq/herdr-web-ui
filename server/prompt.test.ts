@@ -909,6 +909,18 @@ describe("the fallback card for a blocked pane no reader knows", () => {
     expect(labels(parseFallbackPrompt("gjc", "Access?\n1. Cancel\n2. Full access (f)\n   Allows writing to every file\n\nType f, then Enter\n"))).toEqual(["Enter", "Esc"]);
   });
 
+  test("takes the last line for a hint only when it names a way to choose", () => {
+    const menu = (hint: string) => labels(parseFallbackPrompt("gjc", `Pick one:\n1. Alpha\n2. Beta\n\n${hint}\n`));
+    // a plain Enter or Press asks for something else: a digit typed there is no answer
+    for (const hint of ["Enter recovery code", "Enter your password", "Press any key", "Enter to continue"]) {
+      expect(menu(hint)).toEqual(["Enter", "Esc"]);
+    }
+    expect(labels(parseFallbackPrompt("gjc", "1. A\n2. B\nEnter recovery code\n"))).toEqual(["Enter", "Esc"]);
+    for (const hint of ["Enter to select", "↵ choose · esc back", "Enter to confirm · Esc to cancel", "Enter a number", "Type 1-2", "↑/↓ to move", "Tab/arrows to navigate"]) {
+      expect(menu(hint)).toEqual(["Alpha", "Beta", "Enter", "Esc"]);
+    }
+  });
+
   test("reads no menu unless its hint is the screen's last line, with only the last row's wrap above it", () => {
     // a new prompt under the hint takes what is typed now: a digit there is no menu answer
     expect(labels(parseFallbackPrompt("gjc", "Pick:\n1. Read only\n2. Full access\nEnter to select\nEnter recovery code ABCD\n"))).toEqual(["Enter", "Esc"]);
