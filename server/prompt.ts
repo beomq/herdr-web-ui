@@ -783,8 +783,8 @@ const ARROWS_RE = /[↑↓]|\barrow keys\b/i;
 const MENU_HINT_RE = /\b(?:enter|select|choose|pick|number|esc)\b/i;
 /** an input field waiting at a line's end ("Password:", "Choice: 2") */
 const INPUT_FIELD_RE = /:\s*\S{0,3}$/;
-/** a line that reads as a hint of its own, not a label's wrapped words ("…the selected number") */
-const HINT_LINE_RE = /^(?:[↵⏎]|(?:press|enter|select|choose|pick|type|esc)\b)/i;
+/** a line that reads as a hint of its own, not a label's wrapped words ("…the selected number", "choose one") */
+const HINT_LINE_RE = /^(?:[↵⏎]|(?:Press|Enter|Select|Choose|Pick|Type|Esc|ESC)\b)/;
 /** how many lines the last row of a menu wraps onto, at most: more reads as output under it */
 const MENU_WRAP_LINES = 2;
 /** a line that is an input box or quoted output rather than a prompt's own text */
@@ -889,7 +889,7 @@ function fallbackMenu(lines: string[], shown: number[]): { start: number; rows: 
   for (const [at, row] of rows.entries()) {
     const wrapped = lines.slice(row.lineIndex + 1, rows[at + 1]?.lineIndex ?? end).map(cleanLine).filter(Boolean);
     // a hint or an input field inside the last row's wrap may be an older prompt, with a new one under it
-    if (wrapped.some((line) => NOT_PROMPT_TEXT_RE.test(line) || (at === rows.length - 1 && (HINT_LINE_RE.test(line) || INPUT_FIELD_RE.test(line))))) return null;
+    if (wrapped.some((line) => NOT_PROMPT_TEXT_RE.test(line) || (at === rows.length - 1 && (HINT_LINE_RE.test(line) || /:\s*$/.test(line))))) return null;
     // the key may end the row's first line, with a description wrapped under it
     if ([row.label, ...wrapped].some((line) => /\(\w\)$/.test(line))) return null;
     row.label = [row.label, ...wrapped].join(" ");
