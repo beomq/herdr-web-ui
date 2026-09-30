@@ -855,23 +855,23 @@ function withoutLine(lines: string[], question: string | undefined): string | nu
 
 /**
  * A numbered menu (`1.` … `n.`, 2 to 9 rows, at most one marked) that still owns the screen's
- * end: under its last row only the lines that row wraps onto (right under it, indented past its
- * number), then one hint line that says to choose, the screen's last. Anything else there (a
- * second hint, a new prompt, an input box) may be what takes the keys now, so it is no menu.
- * A wrapped label is no guess here, since every row starts with its own number.
+ * end: its hint, a line that says to choose, is the screen's last, and between the last row and
+ * it are only the lines that row wraps onto (right under it, indented past its number). Anything
+ * else there (another hint, a new prompt, an input box) may be what takes the keys now, so it is
+ * no menu. A wrapped label is no guess here, since every row starts with its own number.
  */
 function fallbackMenu(lines: string[], shown: number[]): { start: number; rows: NumberedRow[] } | null {
   const lastRow = [...shown].reverse().find((index) => NUMBERED_OPTION_RE.test(cleanLine(lines[index]!)));
-  if (lastRow === undefined) return null;
-  let end = lastRow + 1;
-  const numberAt = lines[lastRow]!.search(/\d/);
-  while (end < lines.length && cleanLine(lines[end]!) && !isDivider(lines[end]!) && lines[end]!.search(/\S/) > numberAt) end += 1;
-  const after = shown.filter((index) => index >= end).map((index) => cleanLine(lines[index]!));
-  if (after.length !== 1) return null;
-  const hint = after[0]!;
+  const hintIndex = shown.at(-1);
+  if (lastRow === undefined || hintIndex === undefined || hintIndex === lastRow) return null;
+  const hint = cleanLine(lines[hintIndex]!);
   // a hint that says to choose, and no input field ("Password:", "Choice: 2"): a numbered
   // list in the agent's output is not a menu
   if (!MENU_HINT_RE.test(hint) || SELECTED_RE.test(hint) || NOT_PROMPT_TEXT_RE.test(hint) || /:\s*\S{0,3}$/.test(hint)) return null;
+  let end = lastRow + 1;
+  const numberAt = lines[lastRow]!.search(/\d/);
+  while (end < hintIndex && cleanLine(lines[end]!) && !isDivider(lines[end]!) && lines[end]!.search(/\S/) > numberAt) end += 1;
+  if (shown.some((index) => index >= end && index < hintIndex)) return null;
   // up from the last row, through rows and the lines they wrap onto, to a blank line or a rule
   let start = lastRow;
   while (start > 0 && cleanLine(lines[start - 1]!) && !isDivider(lines[start - 1]!)) start -= 1;
@@ -882,9 +882,11 @@ function fallbackMenu(lines: string[], shown: number[]): { start: number; rows: 
   // row with its own letter key ("Read only (r)"), means the number may not be the key
   for (const [at, row] of rows.entries()) {
     const wrapped = lines.slice(row.lineIndex + 1, rows[at + 1]?.lineIndex ?? end).map(cleanLine).filter(Boolean);
-    if (wrapped.some((line) => NOT_PROMPT_TEXT_RE.test(line))) return null;
+    // a hint inside the last row's wrap may be an older one, with a new prompt under it
+    if (wrapped.some((line) => NOT_PROMPT_TEXT_RE.test(line) || (at === rows.length - 1 && MENU_HINT_RE.test(line)))) return null;
+    // the key may end the row's first line, with a description wrapped under it
+    if ([row.label, ...wrapped].some((line) => /\(\w\)$/.test(line))) return null;
     row.label = [row.label, ...wrapped].join(" ");
-    if (/\(\w\)$/.test(row.label)) return null;
   }
   return { start, rows };
 }

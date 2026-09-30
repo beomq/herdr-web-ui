@@ -905,6 +905,8 @@ describe("the fallback card for a blocked pane no reader knows", () => {
   test("reads no menu when the last row's wrapped label ends in its own letter key", () => {
     const prompt = parseFallbackPrompt("gjc", "Access?\n1. Read only\n2. Full access, every file and\n   command (f)\n\nEnter to select\n");
     expect(labels(prompt)).toEqual(["Enter", "Esc"]);
+    // or ends the row's first line, a description wrapped under it
+    expect(labels(parseFallbackPrompt("gjc", "Access?\n1. Cancel\n2. Full access (f)\n   Allows writing to every file\n\nType f, then Enter\n"))).toEqual(["Enter", "Esc"]);
   });
 
   test("reads no menu unless its hint is the screen's last line, with only the last row's wrap above it", () => {
@@ -913,8 +915,10 @@ describe("the fallback card for a blocked pane no reader knows", () => {
     expect(labels(parseFallbackPrompt("gjc", "Pick:\n1. Read only\n2. Full access\n\nEnter to select\nWaiting for the token\n"))).toEqual(["Enter", "Esc"]);
     // a line under the last row, not indented past its number, is not its wrap
     expect(labels(parseFallbackPrompt("gjc", "Pick:\n  1. Read only\n  2. Full access\n  Saved.\nEnter to select\n"))).toEqual(["Enter", "Esc"]);
-    // the last row's wrap alone is no hint
-    expect(labels(parseFallbackPrompt("gjc", "Pick:\n1. Read only\n2. Full access and\n   select all\n"))).toEqual(["Enter", "Esc"]);
+    // nor a hint inside the last row's wrap, with a new prompt under it
+    expect(labels(parseFallbackPrompt("gjc", "Done:\n1. Read settings\n2. Load profiles\n   Profiles loaded\n   Enter to continue\nEnter recovery code ABCD\n"))).toEqual(["Enter", "Esc"]);
+    // a hint right under the last row, indented like its wrap, is still the hint
+    expect(labels(parseFallbackPrompt("gjc", "Pick a profile:\n1. Work\n2. Home\n   Enter a number >\n"))).toEqual(["Work", "Home", "Enter", "Esc"]);
   });
 
   test("keeps a wrapped label on its own row, since each row starts with its number", () => {
