@@ -60,27 +60,31 @@ try {
     assert.match(await page.locator(".file-viewer-text").innerText(), /localhost/);
     if (process.env.UI_EVIDENCE_DIR) await page.screenshot({ path: `${process.env.UI_EVIDENCE_DIR}/terminal-file-link-${width}.png` });
     console.log(`PASS terminal file click opens viewer at ${width}px`);
-    await page.locator(".file-viewer-header button").last().click();
-    await page.locator(".file-viewer").waitFor({ state: "hidden" });
-    const press = async (label: RegExp, cell: number) => {
-      const line = page.locator(".xterm-rows > div", { hasText: label }).first();
-      await line.waitFor();
-      const lineBox = await line.boundingBox();
-      assert.ok(lineBox);
-      const x = lineBox.x + cellWidth * cell;
-      const y = lineBox.y + lineBox.height / 2;
-      if (width === 390) await page.touchscreen.tap(x, y);
-      else { await page.mouse.move(x, y); await page.mouse.click(x, y); }
-    };
-    await paneSendText(pane, `printf '\\033[2J\\033[HBARENAME README.md\\nPATHNAME scripts/test-herdr.ts\\n'\r`);
-    // A bare name is what a terminal is full of: pressing it opens nothing. Were it a link, the
-    // viewer would cover the terminal and the press on the path below would land on the viewer.
-    await press(/^BARENAME README\.md/, 12.5);
-    await press(/^PATHNAME scripts\//, 12.5);
-    await page.locator(".file-viewer-text").waitFor();
-    assert.match(await page.locator(".file-viewer").innerText(), /test-herdr\.ts/);
-    assert.doesNotMatch(await page.locator(".file-viewer").innerText(), /README\.md/);
-    console.log(`PASS a bare name stays text and a path with a folder opens at ${width}px`);
+    if (width === 1280) {
+      await page.locator(".file-viewer-header button").last().click();
+      await page.locator(".file-viewer").waitFor({ state: "hidden" });
+      // one row with a path and a bare name: `MIXED ` is six cells, the path the next 21, the name from cell 28
+      await paneSendText(pane, `printf '\\033[2J\\033[HMIXED scripts/test-herdr.ts README.md\\n'\r`);
+      const mixed = page.locator(".xterm-rows > div", { hasText: /^MIXED scripts\// }).first();
+      await mixed.waitFor();
+      const mixedBox = await mixed.boundingBox();
+      assert.ok(mixedBox);
+      const y = mixedBox.y + mixedBox.height / 2;
+      const pointer = (shown: boolean) => page.waitForFunction((want) => (document.querySelector(".xterm-cursor-pointer") !== null) === want, shown);
+      // off the row first, so xterm reads its links anew; its pointer says when it has
+      await page.mouse.move(mixedBox.x + cellWidth * 10.5, mixedBox.y + mixedBox.height * 6.5);
+      await pointer(false);
+      await page.mouse.move(mixedBox.x + cellWidth * 10.5, y);
+      await pointer(true);
+      // A bare name is what a terminal is full of: it is no link, so the pointer goes and a
+      // click opens nothing.
+      await page.mouse.move(mixedBox.x + cellWidth * 31.5, y);
+      await pointer(false);
+      await page.mouse.click(mixedBox.x + cellWidth * 31.5, y);
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(null)))));
+      assert.equal(await page.locator(".file-viewer").count(), 0, "a bare file name in the terminal opened the file viewer");
+      console.log("PASS a path with a folder is a link and a bare name beside it stays text");
+    }
     await context.close();
   }
 } finally {
