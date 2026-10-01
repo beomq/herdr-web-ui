@@ -10,7 +10,7 @@ const workspace = await workspaceCreate({ cwd, label: "herdr-web-ui-test-file-li
 const pane = workspace.root_pane.pane_id;
 const server = createServer({ port: 0, hostname: "127.0.0.1", token: "" });
 const browser = await chromium.launch({
-  executablePath: process.env.CHROME_PATH ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  executablePath: process.env.CHROME_PATH ?? (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/chromium"),
   headless: true,
 });
 try {

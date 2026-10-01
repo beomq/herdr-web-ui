@@ -37,7 +37,7 @@ export function terminalFileLinks(buffer: IBuffer, lineNumber: number, open: (pa
   }
   const links: (Omit<ILink, "activate"> & { activate: () => void })[] = [];
   for (const match of text.matchAll(/file:\/\/\/[^\s<>"'`]+/gi)) {
-    const uri = match[0].replace(/[),.;]+$/, "");
+    const uri = match[0].replace(/[),.;:!?]+$/, "");
     const path = fileUriPath(uri);
     const start = positions[match.index];
     const end = positions[match.index + uri.length - 1];

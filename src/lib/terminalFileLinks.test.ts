@@ -3,6 +3,16 @@ import { Terminal } from "@xterm/xterm";
 import { fileUriPath, terminalFileLinks } from "./terminalFileLinks.ts";
 
 describe("terminal file links", () => {
+  it("excludes sentence punctuation but preserves encoded filename punctuation", async () => {
+    const term = new Terminal({ cols: 150, allowProposedApi: true });
+    await new Promise<void>((resolve) => term.write("file:///tmp/a.md: file:///tmp/a.md! file:///tmp/a.md? file:///tmp/a%21.md", resolve));
+    const opened: string[] = [];
+    const links = terminalFileLinks(term.buffer.active, 1, (path) => opened.push(path));
+    expect(links.map((link) => link.text)).toEqual(["file:///tmp/a.md", "file:///tmp/a.md", "file:///tmp/a.md", "file:///tmp/a%21.md"]);
+    for (const link of links) link.activate();
+    expect(opened).toEqual(["/tmp/a.md", "/tmp/a.md", "/tmp/a.md", "/tmp/a!.md"]);
+    term.dispose();
+  });
   it("does not append an unrelated hard row after a full-width URI", async () => {
     const uri = "file:///tmp/README.md";
     const term = new Terminal({ cols: uri.length, allowProposedApi: true });
