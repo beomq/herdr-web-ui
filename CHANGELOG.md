@@ -7,6 +7,12 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
 
 ## [Unreleased]
 
+### Fixed
+- OmO panes show their agent mark in the sidebar even when herdr reports no agent kind,
+  including panes started with OmO in the new-session dialog. Detection uses the pane's
+  foreground processes, not its title, so ordinary shells remain shells
+  ([#224](https://github.com/devswha/herdr-web-ui/pull/224) by @beomq).
+
 ## [0.3.37] - 2026-10-01
 
 ### Changed
@@ -51,9 +57,6 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
   ([#206](https://github.com/devswha/herdr-web-ui/pull/206) by @Haeminway1, [#217](https://github.com/devswha/herdr-web-ui/pull/217)).
 
 ### Fixed
-- OmO panes show their agent mark in the sidebar even when herdr reports no agent kind,
-  including panes started with OmO in the new-session dialog. Detection uses the pane's
-  foreground processes, not its title, so ordinary shells remain shells.
 - A table an agent indents under a list item shows as a table in that item in the chat. It was
   read as the item's text, so its rows ran together on one line with their pipes. The list goes
   on after it: items numbered `1.` throughout keep counting, and nested items stay nested
