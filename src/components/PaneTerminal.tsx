@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -27,6 +27,8 @@ import type { PaneView } from "../lib/actions.ts";
 import { terminalTheme, type Palette, type ResolvedTheme } from "../lib/settings.ts";
 import { useT } from "../lib/i18n.ts";
 import { isAppShortcut } from "../lib/shortcuts.ts";
+import { OpenFileContext } from "../lib/filePaths.ts";
+import { fileUriPath, terminalFileLinkProvider } from "../lib/terminalFileLinks.ts";
 
 // xterm sizes every cell from the first matching font, so a proportional one (Malgun Gothic)
 // must never win it: it stays behind the generic monospace as a per-glyph Hangul fallback
@@ -105,6 +107,9 @@ export function PaneTerminal({
   onServerMessage,
 }: PaneTerminalProps) {
   const t = useT();
+  const openFile = useContext(OpenFileContext);
+  const openFileRef = useRef(openFile);
+  openFileRef.current = openFile;
   const machineId = useMachineId();
   const { answerPanePrompt, uploadPaneImage } = useMachineApi();
   const chatView = view === "chat";
@@ -234,6 +239,14 @@ export function PaneTerminal({
       fontSize: terminalFontSize,
       fontFamily: FONT_STACK,
       theme: terminalTheme(theme, palette),
+      linkHandler: {
+        activate: (_event, uri) => {
+          const path = fileUriPath(uri);
+          if (path !== null) openFileRef.current?.(path);
+          else if (/^https?:\/\//i.test(uri)) window.open(uri, "_blank", "noopener,noreferrer");
+        },
+        allowNonHttpProtocols: true,
+      },
       // Option+drag selects on macOS, as Shift+drag does elsewhere; a plain drag is forced below
       macOptionClickForcesSelection: true,
     });
@@ -241,6 +254,7 @@ export function PaneTerminal({
     term.loadAddon(fit);
     // an address in the terminal opens in a new tab; the page never navigates away from the pane
     term.loadAddon(new WebLinksAddon((_event, uri) => { window.open(uri, "_blank", "noopener,noreferrer"); }));
+    term.registerLinkProvider(terminalFileLinkProvider(() => term.buffer.active, (path) => openFileRef.current?.(path)));
     term.open(host);
     // Let the browser emit a paste event, which xterm already handles (including
     // bracketed paste). Otherwise Ctrl+V becomes 0x16, triggering the agent's

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Download, ExternalLink, X } from "lucide-react";
 
 import "./FileViewer.css";
+import { DirectoryBrowser } from "./DirectoryBrowser.tsx";
 
 import type { FileInfo } from "../../shared/protocol.ts";
 import { ApiError } from "../lib/api.ts";
@@ -27,7 +28,8 @@ export interface FileViewerProps {
  */
 export function FileViewer({ path: asked, paneId, onClose }: FileViewerProps) {
   const t = useT();
-  const { fetchFileInfo, fileUrl } = useMachineApi();
+  const { fetchFileInfo, fileUrl, fetchDirectories } = useMachineApi();
+  const [directory, setDirectory] = useState<string | null>(null);
   // the path as given, until a choice among files of that name replaces it
   const [path, setPath] = useState(asked);
   const [info, setInfo] = useState<FileInfo | null>(null);
@@ -39,7 +41,7 @@ export function FileViewer({ path: asked, paneId, onClose }: FileViewerProps) {
 
   useEffect(() => {
     let cancelled = false;
-    setInfo(null); setCandidates(null); setError(null); setText(null);
+    setInfo(null); setCandidates(null); setError(null); setText(null); setDirectory(null);
     fetchFileInfo(path, paneId).then(async (next) => {
       if (cancelled) return;
       if ("candidates" in next) { setCandidates(next.candidates); return; }
@@ -49,12 +51,20 @@ export function FileViewer({ path: asked, paneId, onClose }: FileViewerProps) {
       const response = await fetch(fileUrl(next.path, paneId), { headers: { range: `bytes=0-${TEXT_PREVIEW_BYTES - 1}` } });
       const body = await response.text();
       if (!cancelled) setText(body);
-    }).catch((reason: unknown) => {
+    }).catch(async (reason: unknown) => {
+      if (cancelled) return;
+      if (reason instanceof ApiError && reason.status === 404) {
+        try {
+          const listing = await fetchDirectories(path, false, true);
+          if (!cancelled) setDirectory(listing.path);
+          return;
+        } catch { /* retain the file error when the target is not a readable directory */ }
+      }
       if (cancelled) return;
       setError(reason instanceof ApiError && reason.status === 404 ? t("No readable file at this path.") : t("The file could not be opened."));
     });
     return () => { cancelled = true; };
-  }, [path, paneId, fetchFileInfo, fileUrl]);
+  }, [path, paneId, fetchFileInfo, fileUrl, fetchDirectories]);
 
   useEffect(() => {
     // the FilesDialog beneath listens on window too (and stands down while this is open); this
@@ -67,6 +77,7 @@ export function FileViewer({ path: asked, paneId, onClose }: FileViewerProps) {
   // the file found (a bare name may have been found deeper in the folder), else as asked
   const url = fileUrl(info?.path ?? path, paneId);
   const body = (() => {
+    if (directory !== null) return <DirectoryBrowser key={directory} start={directory} onOpenFile={setPath} />;
     if (error !== null) return <p className="file-viewer-note" role="alert">{error}</p>;
     if (candidates !== null) return <div className="file-viewer-choices">
       <p className="file-viewer-note">Several files are named {path.split("/").pop()}:</p>

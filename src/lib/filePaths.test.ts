@@ -19,6 +19,6 @@ describe("file paths in chat text", () => {
 
   it("takes a code span that is one file name or path", () => {
     for (const code of ["README.md", "src/app.ts", "~/x/y.png", "/tmp/a.log", "docs/demo.mp4"]) expect(codeIsFilePath(code)).toBe(true);
-    for (const code of ["bun test", "1.2.3", "git log --oneline", "a/b", "foo()", "x.y()"]) expect(codeIsFilePath(code)).toBe(false);
+    for (const code of ["bun test", "1.2.3", "git log --oneline", "a/b", "foo()", "x.y()", "tool.monitor", "Math.random", "process.env", "example.com"]) expect(codeIsFilePath(code)).toBe(false);
   });
 });

@@ -9,6 +9,11 @@ import { createContext } from "react";
 const BARE_PATH = /(?<![\w/.@~-])((?:~\/|\.{1,2}\/|\/)?(?:[\w@.+-]+\/)+[\w@+-][\w@.+-]*\.[A-Za-z0-9]{1,8})(?![\w/])/g;
 const CODE_PATH = /^(?:~\/|\.{1,2}\/|\/)?(?:[\w@.+-]+\/)*[\w@+-][\w@.+-]*\.[A-Za-z0-9]{1,8}$/;
 
+/** Bare dotted identifiers are ambiguous; require a common file extension. */
+export function hasFileNameEvidence(path: string): boolean {
+  return path.includes("/") || /\.(?:md|txt|log|json|jsonc|yaml|yml|toml|xml|csv|ts|tsx|js|jsx|mjs|cjs|html|css|scss|py|go|rs|dart|sh|sql|png|jpg|jpeg|gif|webp|svg|pdf|mp4|webm|mp3|wav|zip)$/i.test(path);
+}
+
 /** Text split into plain runs and the file paths in it. */
 export function splitFilePaths(text: string): (string | { path: string })[] {
   const parts: (string | { path: string })[] = [];
@@ -27,7 +32,7 @@ export function splitFilePaths(text: string): (string | { path: string })[] {
 
 /** A code span that is a single file name or path (`README.md`, `src/app.ts`). */
 export function codeIsFilePath(code: string): boolean {
-  return CODE_PATH.test(code) && /[A-Za-z]/.test(code.replace(/\.[A-Za-z0-9]{1,8}$/, "")) && !/^\d+(?:\.\d+)+$/.test(code);
+  return CODE_PATH.test(code) && hasFileNameEvidence(code) && /[A-Za-z]/.test(code.replace(/\.[A-Za-z0-9]{1,8}$/, "")) && !/^\d+(?:\.\d+)+$/.test(code);
 }
 
 /** Opens a path in the file viewer; null where nothing can open one (paths stay text). */

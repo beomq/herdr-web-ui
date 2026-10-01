@@ -181,6 +181,14 @@ describe("autolinks", () => {
   it("links inside emphasis", () => {
     expect(parseInline("**https://example.com**")).toEqual([{ type: "strong", children: [link("https://example.com")] }]);
   });
+  it("opens a labeled local file URI through the file viewer", () => {
+    expect(parseInline("file:///tmp/README.md")).toEqual([
+      { type: "file", path: "/tmp/README.md", children: [{ type: "text", value: "file:///tmp/README.md" }] },
+    ]);
+    expect(parseInline("[README](file:///tmp/README.md)")).toEqual([
+      { type: "file", path: "/tmp/README.md", children: [{ type: "text", value: "README" }] },
+    ]);
+  });
 });
 
 describe("foldCode", () => {
