@@ -8,12 +8,14 @@ const cwd = process.cwd();
 const shortUri = "file:///etc/hosts";
 const workspace = await workspaceCreate({ cwd, label: "herdr-web-ui-test-file-links" });
 const pane = workspace.root_pane.pane_id;
-const server = createServer({ port: 0, hostname: "127.0.0.1", token: "" });
-const browser = await chromium.launch({
-  executablePath: process.env.CHROME_PATH ?? (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/chromium"),
-  headless: true,
-});
+let server: ReturnType<typeof createServer> | undefined;
+let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 try {
+  server = createServer({ port: 0, hostname: "127.0.0.1", token: "" });
+  browser = await chromium.launch({
+    executablePath: process.env.CHROME_PATH ?? (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/chromium"),
+    headless: true,
+  });
   for (const width of [1280, 390]) {
     const context = await browser.newContext({ viewport: { width, height: 800 }, hasTouch: width === 390, isMobile: width === 390 });
     await context.addInitScript((id) => localStorage.setItem(`herdr-web-ui:view:${id}`, "terminal"), pane);
@@ -56,7 +58,13 @@ try {
     await context.close();
   }
 } finally {
-  await browser.close();
-  server.stop(true);
-  await workspaceClose(workspace.workspace.workspace_id);
+  try {
+    await browser?.close();
+  } finally {
+    try {
+      server?.stop();
+    } finally {
+      await workspaceClose(workspace.workspace.workspace_id);
+    }
+  }
 }
