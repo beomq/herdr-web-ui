@@ -1,7 +1,12 @@
 import type { IBuffer, ILink, ILinkProvider } from "@xterm/xterm";
-import { hasFileNameEvidence } from "./filePaths.ts";
 
-/** File names and paths, optionally followed by an agent's line/column reference. */
+/**
+ * A path, optionally followed by an agent's line/column reference. Only a path with a folder in
+ * it becomes a link (see below): a terminal is full of bare names (`ls`, `git status`, a
+ * compiler's output), a tap or a click to focus the pane lands on one, and the file viewer
+ * would open over the terminal for it. A chat's plain text is read the same way (BARE_PATH in
+ * filePaths.ts).
+ */
 const FILE_PATH = /(?<![\p{L}\p{N}_/.@~:-])((?:~\/|\.{1,2}\/|\/)?(?:[\p{L}\p{N}_@.+-]+\/)*[\p{L}\p{N}_@+-][\p{L}\p{N}_@.+-]*\.[A-Za-z0-9]{1,8})(?::\d+(?::\d+)?)?(?![\p{L}\p{N}_/])/gu;
 
 /** Local file URIs are read by the existing server-side file viewer. */
@@ -48,7 +53,7 @@ export function terminalFileLinks(buffer: IBuffer, lineNumber: number, open: (pa
     const path = match[1];
     if (!path || !/\p{L}/u.test(path.replace(/\.[A-Za-z0-9]{1,8}$/, ""))) continue;
     if (/^v?\d+(?:\.\d+)+$/.test(path)) continue;
-    if (!hasFileNameEvidence(path) || /^\s*\(/.test(text.slice(match.index + match[0].length))) continue;
+    if (!path.includes("/") || /^\s*\(/.test(text.slice(match.index + match[0].length))) continue;
     // Web addresses belong to WebLinksAddon, not the file viewer.
     const before = text.slice(0, match.index);
     if (/\S*(?:https?:\/\/|file:\/\/)[^\s]*$/i.test(before)) continue;

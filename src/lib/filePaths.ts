@@ -9,9 +9,16 @@ import { createContext } from "react";
 const BARE_PATH = /(?<![\w/.@~-])((?:~\/|\.{1,2}\/|\/)?(?:[\w@.+-]+\/)+[\w@+-][\w@.+-]*\.[A-Za-z0-9]{1,8})(?![\w/])/g;
 const CODE_PATH = /^(?:~\/|\.{1,2}\/|\/)?(?:[\w@.+-]+\/)*[\w@+-][\w@.+-]*\.[A-Za-z0-9]{1,8}$/;
 
-/** Bare dotted identifiers are ambiguous; require a common file extension. */
-export function hasFileNameEvidence(path: string): boolean {
-  return path.includes("/") || /\.(?:md|txt|log|json|jsonc|yaml|yml|toml|xml|csv|ts|tsx|js|jsx|mjs|cjs|html|css|scss|py|go|rs|dart|sh|sql|png|jpg|jpeg|gif|webp|svg|pdf|mp4|webm|mp3|wav|zip)$/i.test(path);
+/**
+ * A bare dotted name that is code or a host, not a file: a member of an object every agent
+ * names (`process.env`, `Math.random`, `tool.monitor`) or a domain (`example.com`). It is a
+ * short list of what is known not to be a file, not a list of file extensions: `main.c`,
+ * `App.vue` and `go.mod` are files, and a list of extensions always misses some.
+ */
+const CODE_OBJECT = /^(?:process|console|window|document|navigator|globalThis|Math|JSON|Object|Array|Number|String|Date|Promise|Reflect|Symbol|Bun|Deno|module|exports|import|this|self|tool|os|sys|np|pd|plt|fmt|std)\./;
+const HOST_NAME = /\.(?:com|org|net|io|dev|app|ai|co|kr)$/i;
+function isCodeName(name: string): boolean {
+  return !name.includes("/") && (CODE_OBJECT.test(name) || HOST_NAME.test(name));
 }
 
 /** Text split into plain runs and the file paths in it. */
@@ -32,7 +39,7 @@ export function splitFilePaths(text: string): (string | { path: string })[] {
 
 /** A code span that is a single file name or path (`README.md`, `src/app.ts`). */
 export function codeIsFilePath(code: string): boolean {
-  return CODE_PATH.test(code) && hasFileNameEvidence(code) && /[A-Za-z]/.test(code.replace(/\.[A-Za-z0-9]{1,8}$/, "")) && !/^\d+(?:\.\d+)+$/.test(code);
+  return CODE_PATH.test(code) && !isCodeName(code) && /[A-Za-z]/.test(code.replace(/\.[A-Za-z0-9]{1,8}$/, "")) && !/^\d+(?:\.\d+)+$/.test(code);
 }
 
 /** Opens a path in the file viewer; null where nothing can open one (paths stay text). */

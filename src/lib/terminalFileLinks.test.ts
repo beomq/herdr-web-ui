@@ -26,7 +26,7 @@ describe("terminal file links", () => {
   it("does not link method calls or dotted identifiers", async () => {
     const term = new Terminal({ cols: 160, allowProposedApi: true });
     await new Promise<void>((resolve) => term.write("tool.monitor({}) display(await tool.read({})) Math.random process.env example.com README.md src/custom.monitor", resolve));
-    expect(terminalFileLinks(term.buffer.active, 1, () => {}).map((link) => link.text)).toEqual(["README.md", "src/custom.monitor"]);
+    expect(terminalFileLinks(term.buffer.active, 1, () => {}).map((link) => link.text)).toEqual(["src/custom.monitor"]);
     term.dispose();
   });
   it("opens a wrapped file URI with encoded Korean and spaces", async () => {
@@ -55,11 +55,21 @@ describe("terminal file links", () => {
     expect(opened).toEqual(["src/abc한글.ts"]);
     term.dispose();
   });
+  it("leaves a bare file name alone: only a path with a folder in it, or a file URI, is a link", async () => {
+    const term = new Terminal({ cols: 120, allowProposedApi: true });
+    // what `ls` and `git status` print: a tap to focus the pane must not open the file viewer
+    await new Promise<void>((resolve) => term.write("README.md package.json main.c\r\n M src/App.tsx\r\n?? ./notes.txt ~/x/a.md /etc/hosts.conf", resolve));
+    const texts = (line: number) => terminalFileLinks(term.buffer.active, line, () => {}).map((link) => link.text);
+    expect(texts(1)).toEqual([]);
+    expect(texts(2)).toEqual(["src/App.tsx"]);
+    expect(texts(3)).toEqual(["./notes.txt", "~/x/a.md", "/etc/hosts.conf"]);
+    term.dispose();
+  });
   it("recognizes files with line and column suffixes", async () => {
     const term = new Terminal({ cols: 100, allowProposedApi: true });
     await new Promise<void>((resolve) => term.write("see src/app.ts:42:3 and README.md", resolve));
     const links = terminalFileLinks(term.buffer.active, 1, () => {});
-    expect(links.map((link) => link.text)).toEqual(["src/app.ts:42:3", "README.md"]);
+    expect(links.map((link) => link.text)).toEqual(["src/app.ts:42:3"]);
     term.dispose();
   });
 
