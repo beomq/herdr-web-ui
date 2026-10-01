@@ -11,14 +11,13 @@ const CODE_PATH = /^(?:~\/|\.{1,2}\/|\/)?(?:[\w@.+-]+\/)*[\w@+-][\w@.+-]*\.[A-Za
 
 /**
  * A bare dotted name that is code or a host, not a file: what agents write in backticks all the
- * time (`process.env`, `Math.random`, `tool.monitor`) and a domain (`example.com`). Named one
+ * time (`process.env`, `Math.random`, `tool.monitor`). Named one
  * by one, not by the word before the dot: `tool.vue`, `os.conf` and `std.lock` are files, and
  * so is anything else with an extension, as a list of extensions always misses some.
  */
 const CODE_NAME = /^(?:process\.(?:env|argv|cwd|exit|platform|stdout|stderr|stdin)(?:\.\w+)?|Math\.(?:random|floor|ceil|round|max|min|abs|pow|sqrt|trunc|sign)|JSON\.(?:parse|stringify)|console\.(?:log|error|warn|info|debug)|Object\.(?:keys|values|entries|assign|freeze)|Array\.(?:from|isArray)|Promise\.(?:all|race|any|allSettled|resolve|reject)|Number\.(?:isFinite|isInteger|parseInt|parseFloat)|tool\.(?:monitor|read|bash|grep|write|edit)|os\.(?:path|environ|getcwd|getenv)|sys\.(?:argv|path|exit|stdout|stderr)|window\.(?:location|history|open)|document\.(?:body|title|cookie))$/;
-const HOST_NAME = /\.(?:com|org|net|io)$/i;
 function isCodeName(name: string): boolean {
-  return !name.includes("/") && (CODE_NAME.test(name) || HOST_NAME.test(name));
+  return !name.includes("/") && CODE_NAME.test(name);
 }
 
 /** Text split into plain runs and the file paths in it. */

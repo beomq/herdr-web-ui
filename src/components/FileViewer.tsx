@@ -7,7 +7,8 @@ import { DirectoryBrowser } from "./DirectoryBrowser.tsx";
 import type { FileInfo } from "../../shared/protocol.ts";
 import { ApiError } from "../lib/api.ts";
 import { formatBytes } from "../lib/bridgeProgress.ts";
-import { useMachineApi } from "../lib/machineContext.tsx";
+import { LOCAL_MACHINE } from "../../shared/machines.ts";
+import { useMachineApi, useMachineId } from "../lib/machineContext.tsx";
 import { useT } from "../lib/i18n.ts";
 
 /** Bigger images are offered as a download: a phone decodes an image whole. */
@@ -31,6 +32,9 @@ export interface FileViewerProps {
 export function FileViewer({ path: asked, paneId, onClose, onOpen }: FileViewerProps) {
   const t = useT();
   const { fetchFileInfo, fileUrl, fetchDirectories } = useMachineApi();
+  // a remote PC's bridge reads a relative folder from the pane's folder only from its next bundle
+  // on; until then it would list the bridge's own folder, so only an absolute or ~/ one is listed there
+  const remote = useMachineId() !== LOCAL_MACHINE;
   const [directory, setDirectory] = useState<string | null>(null);
   // the path as given, until a choice among files of that name replaces it
   const [path, setPath] = useState(asked);
@@ -56,7 +60,7 @@ export function FileViewer({ path: asked, paneId, onClose, onOpen }: FileViewerP
     }).catch(async (reason: unknown) => {
       if (cancelled) return;
       // a folder is listed from the pane's folder, as a file is found from it
-      if (reason instanceof ApiError && reason.status === 404) {
+      if (reason instanceof ApiError && reason.status === 404 && (!remote || /^(?:\/|~(?:\/|$)|[A-Za-z]:[\\/])/.test(path))) {
         try {
           const listing = await fetchDirectories(path, false, true, paneId);
           if (!cancelled) setDirectory(listing.path);
@@ -67,7 +71,7 @@ export function FileViewer({ path: asked, paneId, onClose, onOpen }: FileViewerP
       setError(reason instanceof ApiError && reason.status === 404 ? t("No readable file at this path.") : t("The file could not be opened."));
     });
     return () => { cancelled = true; };
-  }, [path, paneId, fetchFileInfo, fileUrl, fetchDirectories]);
+  }, [path, paneId, fetchFileInfo, fileUrl, fetchDirectories, remote]);
 
   useEffect(() => {
     // the FilesDialog beneath listens on window too (and stands down while this is open); this
