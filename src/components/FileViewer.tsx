@@ -53,7 +53,9 @@ export function FileViewer({ path: asked, paneId, onClose }: FileViewerProps) {
       if (!cancelled) setText(body);
     }).catch(async (reason: unknown) => {
       if (cancelled) return;
-      if (reason instanceof ApiError && reason.status === 404) {
+      // a folder is listed by its absolute path alone: the listing resolves a relative one against
+      // the server's own folder, not the pane's, and would show another folder of that name
+      if (reason instanceof ApiError && reason.status === 404 && /^(?:\/|[A-Za-z]:[\\/])/.test(path)) {
         try {
           const listing = await fetchDirectories(path, false, true);
           if (!cancelled) setDirectory(listing.path);

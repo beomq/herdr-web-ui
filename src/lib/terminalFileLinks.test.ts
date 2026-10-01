@@ -2,6 +2,10 @@ import { describe, expect, it } from "bun:test";
 import { Terminal } from "@xterm/xterm";
 import { fileUriPath, terminalFileLinks } from "./terminalFileLinks.ts";
 
+/** a plain press of the primary button, as xterm hands one to a link */
+const click = { button: 0 } as MouseEvent;
+const written = (term: Terminal, text: string) => new Promise<void>((resolve) => term.write(text, resolve));
+
 describe("terminal file links", () => {
   it("excludes sentence punctuation but preserves encoded filename punctuation", async () => {
     const term = new Terminal({ cols: 150, allowProposedApi: true });
@@ -9,7 +13,7 @@ describe("terminal file links", () => {
     const opened: string[] = [];
     const links = terminalFileLinks(term.buffer.active, 1, (path) => opened.push(path));
     expect(links.map((link) => link.text)).toEqual(["file:///tmp/a.md", "file:///tmp/a.md", "file:///tmp/a.md", "file:///tmp/a%21.md"]);
-    for (const link of links) link.activate();
+    for (const link of links) link.activate(click);
     expect(opened).toEqual(["/tmp/a.md", "/tmp/a.md", "/tmp/a.md", "/tmp/a!.md"]);
     term.dispose();
   });
@@ -19,7 +23,7 @@ describe("terminal file links", () => {
     await new Promise<void>((resolve) => term.write(uri + "\r\nPASS unrelated output", resolve));
     const opened: string[] = [];
     const links = terminalFileLinks(term.buffer.active, 1, (path) => opened.push(path));
-    links[0]?.activate();
+    links[0]?.activate(click);
     expect(opened).toEqual(["/tmp/README.md"]);
     term.dispose();
   });
@@ -36,7 +40,7 @@ describe("terminal file links", () => {
     const opened: string[] = [];
     const links = terminalFileLinks(term.buffer.active, 1, (path) => opened.push(path));
     expect(links.map((link) => link.text)).toEqual([uri]);
-    links[0]?.activate();
+    links[0]?.activate(click);
     expect(opened).toEqual(["/tmp/한글 sheet.png"]);
     term.dispose();
   });
@@ -44,6 +48,72 @@ describe("terminal file links", () => {
   it("rejects malformed or nonlocal file URIs", () => {
     for (const uri of ["file://host/tmp/a.png", "file:///tmp/%zz", "file:///tmp/%00", "https://example.com/a.png"])
       expect(fileUriPath(uri)).toBeNull();
+    // a network share on a Windows PC, however its second separator is written, and a control character
+    for (const uri of ["file:////attacker.example/share/doc.txt", "file:///%2Fattacker.example/share/doc.txt", "file:///%5C%5Cattacker.example/share", "file:///tmp/a.md\u0000", "file:///tmp/a\u001b.md"])
+      expect(fileUriPath(uri)).toBeNull();
+    // a Windows drive path loses the slash a URI puts before it
+    expect(fileUriPath("file:///C:/Users/Alice/readme.md")).toBe("C:/Users/Alice/readme.md");
+  });
+
+  it("reads a long line of paths in one pass", async () => {
+    // `(src/a.ts)` over and over as one wrapped line froze the page for seconds while hovering
+    const term = new Terminal({ cols: 200, rows: 40, allowProposedApi: true });
+    await written(term, "(src/a.ts)".repeat(700));
+    expect(terminalFileLinks(term.buffer.active, 1, () => {})).toHaveLength(20);
+    term.dispose();
+    // past a bundle's length it is no prose with paths in it, and is left alone
+    const blob = new Terminal({ cols: 200, rows: 60, allowProposedApi: true });
+    await written(blob, "(src/a.ts)".repeat(900));
+    expect(terminalFileLinks(blob.buffer.active, 1, () => {})).toEqual([]);
+    blob.dispose();
+  });
+
+  it("does not link the tail of a line whose beginning scrolled off", async () => {
+    const term = new Terminal({ cols: 20, rows: 2, scrollback: 0, allowProposedApi: true });
+    await written(term, "file:///work/abcdefghijk/subdir/App.tsx\r\n");
+    // the top row now starts in the middle of the address: `hijk/subdir/App.tsx` is no path of its own
+    expect(term.buffer.active.getLine(0)?.isWrapped).toBe(true);
+    expect(terminalFileLinks(term.buffer.active, 1, () => {})).toEqual([]);
+    term.dispose();
+  });
+
+  it("keeps a name with a combining mark whole", async () => {
+    const term = new Terminal({ cols: 80, allowProposedApi: true });
+    await written(term, "see src/cafe\u0301/index.ts");
+    const opened: string[] = [];
+    const links = terminalFileLinks(term.buffer.active, 1, (path) => opened.push(path));
+    expect(links).toHaveLength(1);
+    links[0]?.activate(click);
+    expect(opened).toEqual(["src/cafe\u0301/index.ts"]);
+    term.dispose();
+  });
+
+  it("links a compiler's file(line,column) and leaves a call alone", async () => {
+    const term = new Terminal({ cols: 120, allowProposedApi: true });
+    await written(term, "src/App.tsx(120,8): error TS1000 lib/run.js(42) and lib/run.js(arg)");
+    expect(terminalFileLinks(term.buffer.active, 1, () => {}).map((link) => link.text)).toEqual(["src/App.tsx", "lib/run.js"]);
+    term.dispose();
+  });
+
+  it("ends a link on the last cell of a wide character", async () => {
+    const term = new Terminal({ cols: 80, allowProposedApi: true });
+    await written(term, "file:///tmp/한글");
+    // 12 narrow cells, then two characters of two cells each
+    expect(terminalFileLinks(term.buffer.active, 1, () => {})[0]?.range).toEqual({ start: { x: 1, y: 1 }, end: { x: 16, y: 1 } });
+    term.dispose();
+  });
+
+  it("opens nothing when the row no longer shows the link it was read from", async () => {
+    const term = new Terminal({ cols: 80, allowProposedApi: true });
+    await written(term, "open src/old.ts");
+    const opened: string[] = [];
+    const links = terminalFileLinks(term.buffer.active, 1, (path) => opened.push(path));
+    expect(links.map((link) => link.text)).toEqual(["src/old.ts"]);
+    // herdr repaints the row; xterm still holds the link it read before
+    await written(term, "\r\u001b[2Kopen src/new.ts");
+    links[0]?.activate(click);
+    expect(opened).toEqual([]);
+    term.dispose();
   });
   it("opens the full path when a wide character wraps from the last column", async () => {
     const term = new Terminal({ cols: 40, allowProposedApi: true });
@@ -51,7 +121,7 @@ describe("terminal file links", () => {
     const opened: string[] = [];
     const links = terminalFileLinks(term.buffer.active, 2, (path) => opened.push(path));
     expect(links.map((link) => link.text)).toEqual(["src/abc한글.ts"]);
-    links[0]?.activate();
+    links[0]?.activate(click);
     expect(opened).toEqual(["src/abc한글.ts"]);
     term.dispose();
   });

@@ -185,6 +185,11 @@ describe("autolinks", () => {
     expect(parseInline("file:///tmp/README.md")).toEqual([
       { type: "file", path: "/tmp/README.md", children: [{ type: "text", value: "file:///tmp/README.md" }] },
     ]);
+    // Korean written straight after the address is prose, as it is after an http one
+    expect(parseInline("file:///tmp/a.md에서 확인")).toEqual([
+      { type: "file", path: "/tmp/a.md", children: [{ type: "text", value: "file:///tmp/a.md" }] },
+      { type: "text", value: "에서 확인" },
+    ]);
     expect(parseInline("[README](file:///tmp/README.md)")).toEqual([
       { type: "file", path: "/tmp/README.md", children: [{ type: "text", value: "README" }] },
     ]);

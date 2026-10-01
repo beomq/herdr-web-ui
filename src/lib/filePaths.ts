@@ -13,12 +13,15 @@ const CODE_PATH = /^(?:~\/|\.{1,2}\/|\/)?(?:[\w@.+-]+\/)*[\w@+-][\w@.+-]*\.[A-Za
  * A bare dotted name that is code or a host, not a file: a member of an object every agent
  * names (`process.env`, `Math.random`, `tool.monitor`) or a domain (`example.com`). It is a
  * short list of what is known not to be a file, not a list of file extensions: `main.c`,
- * `App.vue` and `go.mod` are files, and a list of extensions always misses some.
+ * `App.vue` and `go.mod` are files, and a list of extensions always misses some. A name that
+ * ends as a source file does is one whatever stands before the dot: `os.py`, `tool.ts`, `fmt.go`.
  */
 const CODE_OBJECT = /^(?:process|console|window|document|navigator|globalThis|Math|JSON|Object|Array|Number|String|Date|Promise|Reflect|Symbol|Bun|Deno|module|exports|import|this|self|tool|os|sys|np|pd|plt|fmt|std)\./;
-const HOST_NAME = /\.(?:com|org|net|io|dev|app|ai|co|kr)$/i;
+const SOURCE_EXTENSION = /\.(?:py|rs|ts|tsx|js|jsx|mjs|cjs|go|c|h|cc|cpp|hpp|rb|java|kt|swift|cs|php|lua|sh|md|txt|json|toml|yaml|yml|html|css)$/i;
+const HOST_NAME = /\.(?:com|org|net|io|kr)$/i;
 function isCodeName(name: string): boolean {
-  return !name.includes("/") && (CODE_OBJECT.test(name) || HOST_NAME.test(name));
+  if (name.includes("/")) return false;
+  return (CODE_OBJECT.test(name) && !SOURCE_EXTENSION.test(name)) || HOST_NAME.test(name);
 }
 
 /** Text split into plain runs and the file paths in it. */

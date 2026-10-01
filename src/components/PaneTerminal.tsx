@@ -233,6 +233,9 @@ export function PaneTerminal({
     const host = hostRef.current;
     if (!host) return;
 
+    // xterm activates a link whenever a press and its release land on it: a drag that selects
+    // part of a path and a right click do too, and neither means "open this"
+    const linkPressed = (event: MouseEvent): boolean => event.button === 0 && !term.hasSelection();
     const term = new Terminal({
       convertEol: false,
       cursorBlink: true,
@@ -246,7 +249,8 @@ export function PaneTerminal({
       fontFamily: FONT_STACK,
       theme: terminalTheme(theme, palette),
       linkHandler: {
-        activate: (_event, uri) => {
+        activate: (event, uri) => {
+          if (!linkPressed(event)) return;
           const path = fileUriPath(uri);
           if (path !== null) openFileRef.current?.(path);
           else if (/^https?:\/\//i.test(uri)) window.open(uri, "_blank", "noopener,noreferrer");
@@ -261,7 +265,7 @@ export function PaneTerminal({
     matchHerdrWidths(term);
     // an address in the terminal opens in a new tab; the page never navigates away from the pane
     term.loadAddon(new WebLinksAddon((_event, uri) => { window.open(uri, "_blank", "noopener,noreferrer"); }));
-    term.registerLinkProvider(terminalFileLinkProvider(() => term.buffer.active, (path) => openFileRef.current?.(path)));
+    term.registerLinkProvider(terminalFileLinkProvider(() => term.buffer.active, (path, event) => { if (linkPressed(event)) openFileRef.current?.(path); }));
     term.open(host);
     const stopGlyphs = adjustTerminalGlyphs(term);
     // Let the browser emit a paste event, which xterm already handles (including
