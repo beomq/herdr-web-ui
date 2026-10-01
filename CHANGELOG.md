@@ -7,7 +7,30 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
 
 ## [Unreleased]
 
+## [0.3.37] - 2026-10-01
+
+### Changed
+- Settings → Appearance no longer offers Clawd and the Codex app icon in place of the
+  provider logos. Claude and Codex panes show their provider logos again, also where one of
+  the icons was chosen in 0.3.36. The color palettes stay
+  ([#219](https://github.com/devswha/herdr-web-ui/pull/219)).
+- The chat's status line no longer has **Report a problem**, and on a phone no **Hide keyboard**
+  while typing. A tap on the transcript or a drag down it still puts the keyboard away. Problems
+  go to [GitHub issues](https://github.com/devswha/herdr-web-ui/issues/new/choose)
+  ([#221](https://github.com/devswha/herdr-web-ui/pull/221)).
+- On a touch screen, the chip above the message box that takes Claude Code's suggested next
+  prompt is now off until Settings → Composer → **Suggestion chip** turns it on. The suggestion
+  still stands as the box's placeholder, and Tab still takes it with a keyboard
+  ([#223](https://github.com/devswha/herdr-web-ui/pull/223)).
+
+## [0.3.36] - 2026-10-01
+
 ### Added
+- On a phone, a swipe in from the left edge opens the workspace list and a swipe to the left
+  closes it; a stroke on a text field or one that selects text is left alone. While typing in
+  the chat, a tap on the transcript, a drag down it, or the new **Hide keyboard** button puts
+  the keyboard away to read, and the draft stays in the composer
+  ([#187](https://github.com/devswha/herdr-web-ui/pull/187) by @Haeminway1, [#217](https://github.com/devswha/herdr-web-ui/pull/217)).
 - Settings → Appearance → Colors offers two opt-in palettes beside herdr's amber, which stays
   the default: **Dark report** (a near-black blue-grey canvas, hairlines, near-square corners,
   white primary actions, electric blue only on small marks, and amber / red / green agent states)
@@ -18,11 +41,14 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
   default ([#188](https://github.com/devswha/herdr-web-ui/pull/188) by @Haeminway1).
 - The chat's message box offers the prompt Claude Code suggests next, the grey text in its
   empty input. It stands as the box's placeholder, and Tab takes it into the box; on a touch
-  screen a dashed chip above the box does the same. Nothing is sent until you send it.
+  screen a dashed chip above the box does the same. Nothing is sent until you send it. It is
+  read only while Claude waits for a prompt and never holds up the chat for more than 1.5s
+  ([#198](https://github.com/devswha/herdr-web-ui/pull/198) by @Yoonwoo-Ha, [#216](https://github.com/devswha/herdr-web-ui/pull/216)).
 - Settings → Plan limits → Where puts the plan meters at the top of the sidebar instead of
   beside Settings: a row per account with its plan, the limit closest to running out, a bar
   and when it resets. A tap opens every limit. An account whose numbers are old or missing (a
-  sign-in expired, a provider asking to slow down) dims them and says why in its row.
+  sign-in expired, a provider asking to slow down) dims them and says why in its row
+  ([#206](https://github.com/devswha/herdr-web-ui/pull/206) by @Haeminway1, [#217](https://github.com/devswha/herdr-web-ui/pull/217)).
 
 ### Fixed
 - OmO panes show their agent mark in the sidebar even when herdr reports no agent kind,
@@ -30,23 +56,27 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
   foreground processes, not its title, so ordinary shells remain shells.
 - A table an agent indents under a list item shows as a table in that item in the chat. It was
   read as the item's text, so its rows ran together on one line with their pipes. The list goes
-  on after it: items numbered `1.` throughout keep counting, and nested items stay nested.
-- On a phone, the edge swipe that opens the workspace list leaves text alone: a stroke that
-  starts on a text field, while text is selected, or that starts selecting text no longer opens
-  or closes the list.
+  on after it: items numbered `1.` throughout keep counting, and nested items stay nested
+  ([#209](https://github.com/devswha/herdr-web-ui/pull/209) by @Yoonwoo-Ha, [#217](https://github.com/devswha/herdr-web-ui/pull/217)).
 - `stop` (herdr's Stop action, `bun scripts/plugin.ts stop`) returns once the server is gone.
   It returned at once, while the old supervisor still held the checkout's lock, so a `start`
   right after it found that lock and gave up: nothing ran, and it reported no answer after 20s.
+  On Linux, a server that has exited but whose parent has not yet collected it counts as gone
+  ([#210](https://github.com/devswha/herdr-web-ui/pull/210) by @Yoonwoo-Ha, [#216](https://github.com/devswha/herdr-web-ui/pull/216)).
 - A pane herdr reports waiting for input gets a card in the chat even when no reader knows its
-  screen (Codex's collapsed question queue keeps its own handling). A numbered menu that still
-  takes the answer is offered as its options, each answered by typing its number; anything
-  else shows the screen's last lines with Enter and Esc, plus Yes and No for a `(y/n)` prompt
+  screen (Codex's collapsed question queue keeps its own handling). A numbered menu whose hint
+  (a way to choose, such as "Enter to select") is the screen's last line is offered as its
+  options, each answered by typing its number, with wrapped labels in full and Enter and Esc
+  after them; anything else, such as a new prompt under
+  the hint, shows the screen's last lines with Enter and Esc, plus Yes and No for a `(y/n)` prompt
   and arrows when its hint names them. An answer to a changed screen is refused. Each such
-  wait is logged once.
+  wait is logged once ([#205](https://github.com/devswha/herdr-web-ui/pull/205) by @Haeminway1, [#216](https://github.com/devswha/herdr-web-ui/pull/216)).
 - **Add PC** on a Windows host now says that Windows hosts are not supported yet, instead of
-  failing with the host shell's "'sh' is not recognized" (#189).
+  failing with the host shell's "'sh' is not recognized" ([#208](https://github.com/devswha/herdr-web-ui/pull/208), [#189](https://github.com/devswha/herdr-web-ui/issues/189)).
 - A pane waiting for another web bridge no longer frees its input for a moment and reports the
-  wait twice when herdr's refusal of a retry arrives slowly (a busy PC).
+  wait twice when herdr's refusal of a retry arrives slowly (a busy PC). It keeps waiting and
+  tries again instead, however late that refusal's exit is
+  ([#207](https://github.com/devswha/herdr-web-ui/pull/207) by @Haeminway1, [#216](https://github.com/devswha/herdr-web-ui/pull/216)).
 - In the terminal, **Ctrl+Shift+↑/↓** only switches panes. It no longer also types `ESC[1;6A` /
   `ESC[1;6B` into the pane it switched to ([#215](https://github.com/devswha/herdr-web-ui/pull/215)).
 - On a wide screen, the quick replies above the message box line up with the box instead of
@@ -97,10 +127,6 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
 ## [0.3.34] - 2026-09-30
 
 ### Added
-- On a phone, a swipe in from the left edge opens the workspace list and a swipe to the left
-  closes it.
-- While typing in the chat on a phone, a tap on the transcript, a drag down it, or the new
-  **Hide keyboard** button puts the keyboard away to read; the draft stays in the composer.
 - A pane herdr could not restore after a restart (herdr 0.9.3+, e.g. its folder was
   removed) is marked NOT RESTORED in the sidebar, and selecting it shows herdr's reason
   instead of a terminal that ends at once. The server no longer tries to attach it.
