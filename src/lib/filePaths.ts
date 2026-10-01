@@ -10,18 +10,15 @@ const BARE_PATH = /(?<![\w/.@~-])((?:~\/|\.{1,2}\/|\/)?(?:[\w@.+-]+\/)+[\w@+-][\
 const CODE_PATH = /^(?:~\/|\.{1,2}\/|\/)?(?:[\w@.+-]+\/)*[\w@+-][\w@.+-]*\.[A-Za-z0-9]{1,8}$/;
 
 /**
- * A bare dotted name that is code or a host, not a file: a member of an object every agent
- * names (`process.env`, `Math.random`, `tool.monitor`) or a domain (`example.com`). It is a
- * short list of what is known not to be a file, not a list of file extensions: `main.c`,
- * `App.vue` and `go.mod` are files, and a list of extensions always misses some. A name that
- * ends as a source file does is one whatever stands before the dot: `os.py`, `tool.ts`, `fmt.go`.
+ * A bare dotted name that is code or a host, not a file: what agents write in backticks all the
+ * time (`process.env`, `Math.random`, `tool.monitor`) and a domain (`example.com`). Named one
+ * by one, not by the word before the dot: `tool.vue`, `os.conf` and `std.lock` are files, and
+ * so is anything else with an extension, as a list of extensions always misses some.
  */
-const CODE_OBJECT = /^(?:process|console|window|document|navigator|globalThis|Math|JSON|Object|Array|Number|String|Date|Promise|Reflect|Symbol|Bun|Deno|module|exports|import|this|self|tool|os|sys|np|pd|plt|fmt|std)\./;
-const SOURCE_EXTENSION = /\.(?:py|rs|ts|tsx|js|jsx|mjs|cjs|go|c|h|cc|cpp|hpp|rb|java|kt|swift|cs|php|lua|sh|md|txt|json|toml|yaml|yml|html|css)$/i;
-const HOST_NAME = /\.(?:com|org|net|io|kr)$/i;
+const CODE_NAME = /^(?:process\.(?:env|argv|cwd|exit|platform|stdout|stderr|stdin)(?:\.\w+)?|Math\.(?:random|floor|ceil|round|max|min|abs|pow|sqrt|trunc|sign)|JSON\.(?:parse|stringify)|console\.(?:log|error|warn|info|debug)|Object\.(?:keys|values|entries|assign|freeze)|Array\.(?:from|isArray)|Promise\.(?:all|race|any|allSettled|resolve|reject)|Number\.(?:isFinite|isInteger|parseInt|parseFloat)|tool\.(?:monitor|read|bash|grep|write|edit)|os\.(?:path|environ|getcwd|getenv)|sys\.(?:argv|path|exit|stdout|stderr)|window\.(?:location|history|open)|document\.(?:body|title|cookie))$/;
+const HOST_NAME = /\.(?:com|org|net|io)$/i;
 function isCodeName(name: string): boolean {
-  if (name.includes("/")) return false;
-  return (CODE_OBJECT.test(name) && !SOURCE_EXTENSION.test(name)) || HOST_NAME.test(name);
+  return !name.includes("/") && (CODE_NAME.test(name) || HOST_NAME.test(name));
 }
 
 /** Text split into plain runs and the file paths in it. */

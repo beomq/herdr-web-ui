@@ -921,7 +921,13 @@ export function createServer(
 
       if (pathname === "/api/workspace/directories") {
         if (request.method !== "GET") return badRequest("method_not_allowed", "use GET");
-        const listing = listDirectories(url.searchParams.get("path") ?? "", url.searchParams.get("hidden") === "1", url.searchParams.get("files") === "1");
+        // a folder a pane's chat names is read from that pane's folder, as a file it names is
+        const paneId = url.searchParams.get("pane_id");
+        let base: string | undefined;
+        if (paneId) {
+          try { base = (await paneContext(paneId)).cwd; } catch { /* an absolute path still lists */ }
+        }
+        const listing = listDirectories(url.searchParams.get("path") ?? "", url.searchParams.get("hidden") === "1", url.searchParams.get("files") === "1", base);
         return listing === null ? badRequest("invalid_cwd", "path must be a directory this user can read") : jsonResponse(listing);
       }
 

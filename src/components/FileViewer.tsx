@@ -20,13 +20,15 @@ export interface FileViewerProps {
   path: string;
   paneId: string | null;
   onClose: () => void;
+  /** a file chosen in a folder's listing: opened as the preview, so history and a reload keep it */
+  onOpen?: (path: string) => void;
 }
 
 /**
  * A file an agent wrote, opened in the browser: images, video and audio (streamed, so they
  * play and seek at once), PDFs, and the start of a text file. Anything can be downloaded.
  */
-export function FileViewer({ path: asked, paneId, onClose }: FileViewerProps) {
+export function FileViewer({ path: asked, paneId, onClose, onOpen }: FileViewerProps) {
   const t = useT();
   const { fetchFileInfo, fileUrl, fetchDirectories } = useMachineApi();
   const [directory, setDirectory] = useState<string | null>(null);
@@ -53,11 +55,10 @@ export function FileViewer({ path: asked, paneId, onClose }: FileViewerProps) {
       if (!cancelled) setText(body);
     }).catch(async (reason: unknown) => {
       if (cancelled) return;
-      // a folder is listed by its absolute path alone: the listing resolves a relative one against
-      // the server's own folder, not the pane's, and would show another folder of that name
-      if (reason instanceof ApiError && reason.status === 404 && /^(?:\/|[A-Za-z]:[\\/])/.test(path)) {
+      // a folder is listed from the pane's folder, as a file is found from it
+      if (reason instanceof ApiError && reason.status === 404) {
         try {
-          const listing = await fetchDirectories(path, false, true);
+          const listing = await fetchDirectories(path, false, true, paneId);
           if (!cancelled) setDirectory(listing.path);
           return;
         } catch { /* retain the file error when the target is not a readable directory */ }
@@ -79,7 +80,7 @@ export function FileViewer({ path: asked, paneId, onClose }: FileViewerProps) {
   // the file found (a bare name may have been found deeper in the folder), else as asked
   const url = fileUrl(info?.path ?? path, paneId);
   const body = (() => {
-    if (directory !== null) return <DirectoryBrowser key={directory} start={directory} onOpenFile={setPath} />;
+    if (directory !== null) return <DirectoryBrowser key={directory} start={directory} onOpenFile={onOpen ?? setPath} />;
     if (error !== null) return <p className="file-viewer-note" role="alert">{error}</p>;
     if (candidates !== null) return <div className="file-viewer-choices">
       <p className="file-viewer-note">Several files are named {path.split("/").pop()}:</p>

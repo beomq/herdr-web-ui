@@ -190,6 +190,9 @@ describe("autolinks", () => {
       { type: "file", path: "/tmp/a.md", children: [{ type: "text", value: "file:///tmp/a.md" }] },
       { type: "text", value: "에서 확인" },
     ]);
+    expect(parseInline("file:///tmp/Bob's-notes.md")).toEqual([
+      { type: "file", path: "/tmp/Bob's-notes.md", children: [{ type: "text", value: "file:///tmp/Bob's-notes.md" }] },
+    ]);
     expect(parseInline("[README](file:///tmp/README.md)")).toEqual([
       { type: "file", path: "/tmp/README.md", children: [{ type: "text", value: "README" }] },
     ]);

@@ -12,7 +12,7 @@ const NAME = "\\p{L}\\p{N}\\p{M}_";
 const FILE_PATH = new RegExp(`(?<![${NAME}/.@~:-])((?:~\\/|\\.{1,2}\\/|\\/)?(?:[${NAME}@.+-]+\\/)*[${NAME}@+-][${NAME}@.+-]*\\.[A-Za-z0-9]{1,8})(?::\\d+(?::\\d+)?)?(?![${NAME}/])`, "gu");
 /** `name.ext(` is a call, not a file, unless the parenthesis holds a compiler's line and column: `App.tsx(120,8)` */
 const CALL = /\s*\((?!\d+(?:,\d+)?\))/y;
-const FILE_URI = /file:\/\/\/[^\s<>"'`]+/gi;
+const FILE_URI = /file:\/\/\/[^\s<>"`]+/gi;
 /** A logical line longer than this is not prose with paths in it (a minified bundle, a blob): it is left alone. */
 const MAX_LINE_CHARS = 8192;
 
@@ -25,7 +25,7 @@ export function fileUriPath(uri: string): string | null {
     if (url.host || url.search || url.hash) return null;
     const path = decodeURIComponent(url.pathname);
     // two separators in front name a network share on a Windows PC, however the second was written
-    if (path.includes("\0") || /^[\\/]{2}/.test(path)) return null;
+    if (/[\u0000-\u001f\u007f]/.test(path) || /^[\\/]{2}/.test(path)) return null;
     // `/C:/Users/me/a.md` is how a URI writes a Windows drive path
     return /^\/[A-Za-z]:[\\/]/.test(path) ? path.slice(1) : path;
   } catch {
@@ -96,17 +96,18 @@ export function terminalFileLinks(buffer: IBuffer, lineNumber: number, open: (pa
       // a wide character's last cell is the link's end, not its first
       range: { start: { x: start.x, y: start.y }, end: { x: last.x + last.width - 1, y: last.y } },
       text: shown,
-      // xterm keeps a row's links until the pointer leaves the row: what the row shows by the
-      // time of the click must still be this text, or the click opens what was there before
+      // xterm keeps a row's links until the pointer leaves the row: the row is read again at the
+      // click, and it opens only if the same whole link is still there (`foo.ts` grown to `foo.tsx` is not)
       activate: (event) => {
-        const now = logicalLine(buffer, lineNumber);
-        const at = now?.positions[index];
-        if (now?.text.startsWith(shown, index) && at?.x === start.x && at.y === start.y) open(path, event);
+        const same = terminalFileLinks(buffer, lineNumber, () => {}).some((now) => now.text === shown
+          && now.range.start.x === start.x && now.range.start.y === start.y
+          && now.range.end.x === last.x + last.width - 1 && now.range.end.y === last.y);
+        if (same) open(path, event);
       },
     });
   };
   for (const match of text.matchAll(FILE_URI)) {
-    const uri = match[0].replace(/[),.;:!?]+$/, "");
+    const uri = match[0].replace(/[),.;:!?']+$/, "");
     const path = fileUriPath(uri);
     if (path) link(match.index, uri, path);
   }

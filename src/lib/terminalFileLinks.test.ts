@@ -17,6 +17,12 @@ describe("terminal file links", () => {
     expect(opened).toEqual(["/tmp/a.md", "/tmp/a.md", "/tmp/a.md", "/tmp/a!.md"]);
     term.dispose();
   });
+  it("keeps an apostrophe inside a file URI and drops one after it", async () => {
+    const term = new Terminal({ cols: 120, allowProposedApi: true });
+    await written(term, "see file:///tmp/Bob's-notes.md and 'file:///tmp/a.md'");
+    expect(terminalFileLinks(term.buffer.active, 1, () => {}).map((link) => link.text)).toEqual(["file:///tmp/Bob's-notes.md", "file:///tmp/a.md"]);
+    term.dispose();
+  });
   it("does not append an unrelated hard row after a full-width URI", async () => {
     const uri = "file:///tmp/README.md";
     const term = new Terminal({ cols: uri.length, allowProposedApi: true });
@@ -51,6 +57,10 @@ describe("terminal file links", () => {
     // a network share on a Windows PC, however its second separator is written, and a control character
     for (const uri of ["file:////attacker.example/share/doc.txt", "file:///%2Fattacker.example/share/doc.txt", "file:///%5C%5Cattacker.example/share", "file:///tmp/a.md\u0000", "file:///tmp/a\u001b.md"])
       expect(fileUriPath(uri)).toBeNull();
+    // a control character written encoded is refused too: the server trimmed `%0A` and opened /etc/hosts
+    for (const uri of ["file:///etc/hosts%0A", "file:///tmp/a%1B.md", "file:///tmp/a%7F.md"]) expect(fileUriPath(uri)).toBeNull();
+    // an apostrophe belongs to the name
+    expect(fileUriPath("file:///tmp/Bob's-notes.md")).toBe("/tmp/Bob's-notes.md");
     // a Windows drive path loses the slash a URI puts before it
     expect(fileUriPath("file:///C:/Users/Alice/readme.md")).toBe("C:/Users/Alice/readme.md");
   });
@@ -113,6 +123,15 @@ describe("terminal file links", () => {
     await written(term, "\r\u001b[2Kopen src/new.ts");
     links[0]?.activate(click);
     expect(opened).toEqual([]);
+    // the same link grown by a letter is another file
+    await written(term, "\r\u001b[2Kopen src/foo.ts");
+    const grown = terminalFileLinks(term.buffer.active, 1, (path) => opened.push(path));
+    await written(term, "x");
+    grown[0]?.activate(click);
+    expect(opened).toEqual([]);
+    // a link still shown opens
+    terminalFileLinks(term.buffer.active, 1, (path) => opened.push(path))[0]?.activate(click);
+    expect(opened).toEqual(["src/foo.tsx"]);
     term.dispose();
   });
   it("opens the full path when a wide character wraps from the last column", async () => {
