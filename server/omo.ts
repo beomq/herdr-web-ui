@@ -5,22 +5,18 @@ import { herdrRpc } from "./herdr/client.ts";
 import { processStartedAt } from "./process-start.ts";
 
 const OMO_PROCESS = /(^|\/)omo(\.js)?$|\/omo-ai\//;
-export function isOmoProcess(argv: readonly string[]): boolean { return argv.some((word) => OMO_PROCESS.test(word)); }
-
+/** node and bun run a script: the program is then the script, the first word that is not a flag */
+const JS_RUNTIME = /(^|\/)(node|nodejs|bun)$/;
 /**
- * herdr's agent.start has no omo kind, so the pane's shell runs omo and its process
- * tree tells when omo is up. Resolves once omo is the pane's foreground process.
+ * Only the program counts: argv[0] (omo's native binary, its SDK's claude), or the script a
+ * JS runtime runs (`bun …/omo-ai/…/cli.js`, `node …/bin/omo`). An omo-ai path handed to another
+ * program (`grep -q …/omo-ai/x`, `cat …/bin/omo`) is that program's argument, not omo. The word
+ * is one path: a PATH list that names omo-ai's bin directory (`printf %s\n $PATH` in an rc
+ * file) made a fresh shell pass for omo for a moment.
  */
-export async function startOmo(paneId: string, args: string[] = [], options: { command?: string; timeoutMs?: number } = {}): Promise<void> {
-  const quoted = args.map((arg) => `'${arg.replaceAll("'", `'\\''`)}'`);
-  await herdrRpc("pane.send_text", { pane_id: paneId, text: `${[options.command ?? "omo", ...quoted].join(" ")}\n` });
-  const deadline = Date.now() + (options.timeoutMs ?? 60_000);
-  while (Date.now() < deadline) {
-    const info = await herdrRpc<{ process_info?: { foreground_processes?: { argv?: string[] }[] } }>("pane.process_info", { pane_id: paneId }).catch(() => null);
-    if (info?.process_info?.foreground_processes?.some((process) => isOmoProcess(process.argv ?? []))) return;
-    await Bun.sleep(250);
-  }
-  throw new Error("omo did not start in the pane");
+export function isOmoProcess(argv: readonly string[]): boolean {
+  const program = JS_RUNTIME.test(argv[0] ?? "") ? argv.slice(1).find((word) => !word.startsWith("-")) : argv[0];
+  return program !== undefined && !program.includes(":") && OMO_PROCESS.test(program);
 }
 
 export interface OmoCandidate { path: string; id: string; createdAt: number | null }

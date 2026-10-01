@@ -300,49 +300,8 @@ try {
   await composer.fill("");
   console.log("PASS the composer keeps an IME's committing Enter");
 
-  // a problem report gathers the pane's pieces, sends nothing on its own, and files a prefilled issue
-  await page.getByRole("button", { name: "Report a problem", exact: true }).click();
-  const reportDialog = page.getByRole("dialog", { name: "Report a problem" });
-  const reportText = reportDialog.getByRole("textbox", { name: "Report", exact: true });
-  await until(async () => (await reportText.inputValue()).includes("## Environment"), "report gathered");
-  await reportDialog.getByRole("textbox", { name: "What went wrong?" }).fill("list numbers read 1. 1. 1.");
-  await reportDialog.getByLabel("Terminal screen").check();
-  await until(async () => (await reportText.inputValue()).includes("## Terminal screen"), "screen included");
-  assert.match(await reportText.inputValue(), /## What went wrong\n\nlist numbers read 1\. 1\. 1\./);
-  const redacted = "한글 보고서 😀\n".repeat(1000);
-  await reportText.fill(redacted);
-  await reportDialog.getByLabel("Terminal screen").uncheck();
-  await report("working");
-  await Bun.sleep(300);
-  assert.equal(await reportText.inputValue(), redacted, "manual redactions survive live updates and option changes");
-  assert.ok((await reportDialog.getByRole("link", { name: "Open a GitHub issue" }).getAttribute("href"))!.length <= 2000);
-  const download = page.waitForEvent("download");
-  await reportDialog.getByRole("button", { name: "Save as file", exact: true }).click();
-  const savedReport = await download;
-  assert.match(savedReport.suggestedFilename(), /^herdr-report-.+\.md$/);
-  assert.equal(await Bun.file((await savedReport.path())!).text(), redacted, "saved report is complete");
-  // the issue page itself is GitHub's: the address asked for is what is checked, and never loaded
-  let issueRequested = "";
-  await page.context().route(/^https:\/\/github\.com\//, async (route) => {
-    issueRequested ||= route.request().url();
-    await route.fulfill({ status: 200, contentType: "text/plain", body: "stub" });
-  });
-  const popup = page.waitForEvent("popup");
-  await reportDialog.getByRole("link", { name: "Open a GitHub issue", exact: true }).click();
-  const issue = await popup;
-  await until(() => issueRequested !== "", "issue address requested");
-  const issueAddress = new URL(issueRequested);
-  assert.equal(`${issueAddress.origin}${issueAddress.pathname}`, "https://github.com/devswha/herdr-web-ui/issues/new");
-  assert.equal(issueAddress.searchParams.get("title"), "[claude] list numbers read 1. 1. 1.");
-  assert.ok(issueRequested.length <= 2000);
-  assert.match(issueAddress.searchParams.get("body")!, /Please paste the full report/);
-  await issue.close();
-  await reportDialog.getByRole("button", { name: "Rebuild report" }).click();
-  assert.match(await reportText.inputValue(), /## Environment/);
-  await report("idle");
-  await reportDialog.getByRole("button", { name: "Close", exact: true }).click();
-  await reportDialog.waitFor({ state: "hidden" });
-  console.log("PASS a problem report gathers the pane, saves a file, and opens a prefilled issue");
+  // the status line holds the agent and its state: no report action
+  assert.equal(await page.getByRole("button", { name: "Report a problem", exact: true }).count(), 0, "no report action");
 
   const selectPane = async (paneId: string) => {
     await page.locator(`.pane-select[title^="${paneId} —"]`).click();
@@ -376,6 +335,44 @@ try {
   if (process.env.UI_EVIDENCE_DIR) await page.screenshot({ path: join(process.env.UI_EVIDENCE_DIR, "composer-acknowledged-draft.png") });
   await composer.fill("draft for A");
   console.log("PASS successful sends settle after switching panes and preserve edits made after returning");
+
+  // a workspace with two panes gets a fold caret; the fold is remembered and opens again for a pane picked inside it
+  const split = await herdrRpc<{ pane: { pane_id: string } }>("pane.split", { target_pane_id: paneB, direction: "down", focus: false });
+  // the header, not a pane row, names the section: its rows are exactly what folding removes
+  const sectionB = page.locator(".workspace", { has: page.locator(".workspace-label", { hasText: "herdr-web-ui-test-browser-b" }) });
+  const toggleB = sectionB.locator(".workspace-toggle");
+  await toggleB.waitFor();
+  assert.equal(await page.locator(".workspace", { has: page.locator(`.pane-select[title^="${paneA} —"]`) }).locator(".workspace-toggle").count(), 0, "a lone pane has nothing to fold");
+  await toggleB.click();
+  await until(async () => await sectionB.locator(".pane-list").count() === 0, "folded workspace hides its panes");
+  assert.equal(await toggleB.getAttribute("aria-expanded"), "false");
+  await sectionB.locator(".badge").waitFor();
+  await page.reload();
+  await page.locator(".conn-live").waitFor();
+  const foldedB = page.locator(".workspace.is-collapsed", { has: page.locator(".workspace-toggle[aria-expanded='false']") });
+  await foldedB.waitFor();
+  assert.equal(await foldedB.locator(`.pane-select[title^="${paneB} —"]`).count(), 0, "the fold survives a reload");
+  await page.goto(`${origin}/?pane=${encodeURIComponent(split.pane.pane_id)}`);
+  await page.locator(".conn-live").waitFor();
+  await until(async () => (await page.locator(`.pane-item.is-selected .pane-select[title^="${split.pane.pane_id} —"]`).count()) === 1, "a pane picked inside a folded workspace unfolds it");
+  assert.equal(await page.locator(".workspace.is-collapsed").count(), 0);
+  // folding the workspace of the selected pane holds: only opening a pane unfolds, not the next snapshot
+  await toggleB.click();
+  await until(async () => await sectionB.locator(".pane-list").count() === 0, "the selected pane's workspace folds");
+  const badgeA = page.locator(".pane-item", { has: page.locator(`.pane-select[title^="${paneA} —"]`) }).locator(".badge");
+  await herdrRpc("pane.report_agent", { pane_id: paneA, source: "manual", agent: "claude", state: "blocked" });
+  await until(async () => await badgeA.getAttribute("data-status") === "blocked", "snapshot update after the fold");
+  await herdrRpc("pane.report_agent", { pane_id: paneA, source: "manual", agent: "claude", state: "idle" });
+  await until(async () => await badgeA.getAttribute("data-status") !== "blocked", "second snapshot update after the fold");
+  assert.equal(await sectionB.locator(".pane-list").count(), 0, "a snapshot update keeps the selected pane's workspace folded");
+  assert.equal(await toggleB.getAttribute("aria-expanded"), "false");
+  await toggleB.click();
+  await until(async () => await sectionB.locator(".pane-list").count() === 1, "workspace unfolded again");
+  await herdrRpc("pane.close", { pane_id: split.pane.pane_id });
+  await until(async () => await page.locator(`.pane-select[title^="${split.pane.pane_id} —"]`).count() === 0, "split pane closed");
+  await selectPane(paneA);
+  await composer.fill("draft for A");
+  console.log("PASS a workspace folds from its caret, stays folded across reloads, and unfolds for a pane opened inside it");
 
   let releaseImage!: () => void;
   const imageGate = new Promise<void>((resolve) => { releaseImage = resolve; });
@@ -567,25 +564,36 @@ try {
   await mobilePage.locator(".chat-terminal-fallback").waitFor();
   assert.equal(await mobilePage.locator(".chat-terminal-fallback").getAttribute("open"), null, "missing native history is labeled, not presented as broken chat");
   assert.equal(await mobilePage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  const mobileReportButton = mobilePage.getByRole("button", { name: "Report a problem", exact: true });
-  assert.equal(await mobileReportButton.innerText(), "Report a problem");
-  const reportButtonBox = await mobileReportButton.boundingBox();
-  assert.ok(reportButtonBox && reportButtonBox.height >= 44 && reportButtonBox.width >= 44, "report action has a touch-sized target");
-  if (process.env.UI_EVIDENCE_DIR) await mobilePage.screenshot({ path: join(process.env.UI_EVIDENCE_DIR, "report-mobile-button.png") });
-  await mobileReportButton.click();
-  const mobileReport = mobilePage.getByRole("dialog", { name: "Report a problem" });
-  await mobileReport.getByRole("link", { name: "Open a GitHub issue" }).waitFor();
-  await mobileReport.getByRole("textbox", { name: "Report", exact: true }).fill("한글 보고서 😀".repeat(1000));
-  for (const theme of ["light", "dark"]) {
-    await mobilePage.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
-    const action = await mobileReport.getByRole("link", { name: "Open a GitHub issue" }).boundingBox();
-    assert.ok(action && action.y >= 0 && action.y + action.height <= 844, "mobile issue action fits viewport");
-    assert.equal(await mobilePage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-    if (process.env.UI_EVIDENCE_DIR) await mobilePage.screenshot({ path: join(process.env.UI_EVIDENCE_DIR, `report-mobile-${theme}.png`) });
-  }
-  await mobileReport.getByRole("button", { name: "Close", exact: true }).click();
+  // a phone's status line holds the agent and its state: no report action, and no keyboard button while typing
+  await mobilePage.evaluate(() => document.documentElement.setAttribute("data-keyboard", ""));
+  assert.equal(await mobilePage.getByRole("button", { name: "Report a problem", exact: true }).count(), 0, "no report action on a phone");
+  assert.equal(await mobilePage.getByRole("button", { name: "Hide keyboard", exact: true }).count(), 0, "no keyboard button on a phone");
+  await mobilePage.evaluate(() => document.documentElement.removeAttribute("data-keyboard"));
   assert.deepEqual(errors, []);
   console.log("PASS mobile composer with unavailable storage and no horizontal overflow");
+
+  // Claude's suggestion on a phone is the placeholder only, until Settings turns its chip on
+  const promptRoute = `**/api/pane/prompt?pane_id=${encodeURIComponent(paneB)}`;
+  const suggest = { json: { prompt: null, suggestion: "run the tests" } };
+  const mobileComposer = mobilePage.getByRole("textbox", { name: "Message", exact: true });
+  await mobilePage.route(promptRoute, (route) => route.fulfill(suggest));
+  await mobileComposer.fill("");
+  await until(async () => await mobileComposer.getAttribute("placeholder") === "run the tests", "a phone shows the suggestion as the placeholder");
+  assert.equal(await mobilePage.getByTitle("Use the suggestion", { exact: true }).count(), 0, "no suggestion chip until Settings turns it on");
+  await mobilePage.unroute(promptRoute);
+  const chipPhone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await chipPhone.addInitScript(() => { localStorage.setItem("herdr-web-ui:settings", JSON.stringify({ showSuggestionChip: true })); });
+  const chipPage = await chipPhone.newPage();
+  chipPage.on("pageerror", (error) => errors.push(error.message));
+  await chipPage.route(promptRoute, (route) => route.fulfill(suggest));
+  await chipPage.goto(`${origin}/?pane=${encodeURIComponent(paneB)}`);
+  await chipPage.locator(".conn-live").waitFor();
+  await chipPage.getByTitle("Chat transcript (⌘⇧J)", { exact: true }).click();
+  await chipPage.getByTitle("Use the suggestion", { exact: true }).click();
+  assert.equal(await chipPage.getByRole("textbox", { name: "Message", exact: true }).inputValue(), "run the tests", "the chip puts the suggestion in the box");
+  await chipPhone.close();
+  assert.deepEqual(errors, []);
+  console.log("PASS a phone offers Claude's suggestion as a chip only once Settings turns it on");
 
   // the terminal lens on a touch screen: an input line sends whole lines; the grid raises no keyboard
   const touch = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });

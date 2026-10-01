@@ -7,7 +7,146 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
 
 ## [Unreleased]
 
+### Fixed
+- A bridge that cannot run the PTY sidecar (no Node, or no `@lydell/node-pty`, as in the Windows
+  bundle) keeps mirroring its panes even when herdr reports terminal attach. It used to leave
+  the working mirror for an attach it could not start, and the terminal ended at once.
+  `/api/health` and the PC list say `terminal_attach: false` and `terminal_mirror: true` there.
+  The real terminal on Windows therefore needs a bundle that ships the sidecar, not only a
+  herdr that attaches ([#265](https://github.com/devswha/herdr-web-ui/pull/265)).
+- A password entered from the secret prompt on a mirrored terminal (a PC whose herdr cannot
+  attach, as on Windows) is reported as entered only after herdr took it, and a send herdr
+  refused is reported as failed instead of as done. Enter is now pressed as a key after the
+  text, not sent as a carriage return inside it
+  ([#263](https://github.com/devswha/herdr-web-ui/pull/263)).
+- A pane running a command that is only given an omo path (`grep -q …/omo-ai/x`, `cat …/bin/omo`) is
+  no longer shown as OmO or counted as a second OmO in its folder. Only the program a pane runs
+  counts, or the script that node or bun runs
+  ([#249](https://github.com/devswha/herdr-web-ui/pull/249)).
+- **New session** with Gajae Code starts on a Windows PC. The command was typed the way a POSIX
+  shell wants it and ended with a newline, which PowerShell takes for a line break, so it never
+  ran; and herdr names only the pane's shell on Windows, so the start was never seen. The
+  command is now written for the pane's shell (PowerShell or cmd), run with the Enter key, and
+  found among the shell's child processes. OmO is not offered on a Windows PC for now
+  ([#251](https://github.com/devswha/herdr-web-ui/pull/251)).
+- A reverse proxy on the same PC that keeps the browser's `Host` but sends no
+  `X-Forwarded-For` no longer makes every visitor count as this computer. A request from this
+  PC with a `Host` that is not `localhost` or `127.0.0.1`, or with any forwarding header, is
+  treated as proxied: once a device is paired, a visitor needs pairing or the token. A proxy
+  that also rewrites `Host` and adds nothing, as nginx's plain `proxy_pass` does, still cannot
+  be told from this computer, so set a token behind a proxy. The guide has Caddy and nginx
+  examples to copy ([#252](https://github.com/devswha/herdr-web-ui/pull/252)).
+- The chat lens finds the conversation of a Gajae Code pane and of an omp pane on a Windows PC.
+  Both lookups compared paths with `/`, which a Windows path does not have, and Gajae Code was
+  looked for only among the processes herdr names, which on Windows is the pane's shell alone.
+  Paths are now compared by the PC's own rules, and Gajae Code is found among the shell's child
+  processes, then matched by the text on screen. Once matched, the pane keeps its conversation
+  while that Gajae Code process runs, so a long list or tool output that pushes every answer off
+  the screen no longer drops the chat, and the PC's process list is read once every few seconds
+  instead of on every poll. A path that leaves the store through `..` is
+  refused on every platform. A Windows PC gets this with the next remote bundle
+  ([#264](https://github.com/devswha/herdr-web-ui/pull/264)).
+
+## [0.3.39] - 2026-10-01
+
+### Fixed
+- A password or PIN sent right after a reconnect is no longer refused with "Update this PC to
+  use masked input". The terminal's output could arrive before the server had said what it
+  supports, and a Send in that gap sent nothing
+  ([#244](https://github.com/devswha/herdr-web-ui/pull/244)).
+- A Stop, an Enter or anything typed right after a message no longer reaches the pane once the
+  connection that sent it has closed. It waited behind the message and was sent afterwards, with
+  nobody watching. The message itself is still finished for a phone that locks
+  ([#235](https://github.com/devswha/herdr-web-ui/pull/235)).
+- A terminal whose grid is not the browser's own (a mirrored pane on a PC whose herdr cannot
+  attach, or a view-only connection) can be reached past the edge of a small screen: a drag pans
+  it on a phone, the wheel or a scrollbar in a small desktop window, and it opens on the rows
+  with the prompt instead of the top of the grid
+  ([#241](https://github.com/devswha/herdr-web-ui/pull/241)).
+- An omo question in the chat gets a real card, not the last-resort one with only Enter and
+  Esc. omo asks several questions in one form: the card asks them one at a time, with a chip per
+  question that checks off the answered ones, and an option is picked by its number as in omo.
+  After the last one the card reviews the answers: Submit, tap an answer to change it, or type a
+  comment that goes with them. The card's text comes from the question as omo's session recorded
+  it, so a pane too short for the whole form, or one that wraps it, still shows every option word
+  for word; without the session it is read off the screen, with wrapped Korean words joined back.
+  While an answer is typed in omo's own field, the card offers to save or discard it
+  ([#237](https://github.com/devswha/herdr-web-ui/pull/237) by @nahwan-kim).
+- A pane that waits for another web bridge to let go of its terminal is no longer shown as
+  connected for a moment, and then told again that it is held, when herdr answers a retry slowly.
+  The first bytes `herdr terminal attach` writes before herdr has answered no longer count as
+  the attach having taken ([#243](https://github.com/devswha/herdr-web-ui/pull/243)).
+- A new shell is no longer taken for OmO while its startup files run. A startup command that
+  printed a `PATH` containing omo-ai's directory matched the OmO process check, so the pane could
+  get the OmO mark for a moment and **New session** could report OmO started before it had
+  ([#243](https://github.com/devswha/herdr-web-ui/pull/243)).
+
+## [0.3.38] - 2026-10-01
+
 ### Added
+- A workspace with several panes gets a chevron in its sidebar header that folds its pane rows
+  away. The fold is remembered per PC and workspace, the header keeps its status badge, Needs you
+  still lists agents inside it, and opening one of its panes (palette, Needs you, an alert link)
+  unfolds it ([#222](https://github.com/devswha/herdr-web-ui/pull/222)).
+- **Add PC** connects a Windows PC (x64, OpenSSH Server, herdr 0.9+). Setup asks it in
+  PowerShell when `sh` is not there, installs a Bun-only `win32-x64` bundle under
+  `%LOCALAPPDATA%\herdr-web-ui`, runs herdr's own installer when the PC has no herdr, registers
+  the app key where Windows OpenSSH reads it (an administrator's
+  `administrators_authorized_keys`), and starts the bridge and the daemon through WMI so they
+  outlive the SSH session and each other. The bridge talks to herdr over its named pipe. herdr
+  has no terminal attach on Windows yet ([herdrdev/herdr#4821](https://github.com/herdrdev/herdr/issues/4821)),
+  so `/api/health` and the PC list carry `terminal_attach`, and the real terminal turns on by itself
+  once herdr reports it. Remote bundle `remote-v9`
+  ([#227](https://github.com/devswha/herdr-web-ui/pull/227)).
+- A PC whose herdr cannot attach a terminal (a Windows PC for now) has a terminal lens all the
+  same. The bridge reads the pane's screen a few times a second and repaints it, so output and
+  colours show and typing works. It is a stopgap until herdr can attach there: the cursor is not
+  shown, and the grid is the pane's own size on that PC, not the browser's, so a phone shows its
+  left part and cannot pan it yet
+  ([#230](https://github.com/devswha/herdr-web-ui/issues/230),
+  [#228](https://github.com/devswha/herdr-web-ui/pull/228)).
+
+### Fixed
+- A gjc chat no longer folds hours of work into one turn. gjc wakes its agent with a
+  background job's result in the user's seat; the chat skipped that record, so the answer before
+  it sank into the work block and only the last status line showed as the reply. The result now
+  ends the turn, as a quiet "Background result delivered" divider with the text on request, like
+  a compaction ([#225](https://github.com/devswha/herdr-web-ui/pull/225)).
+- **New session** offers **Gajae Code** when `gjc` is on the server's PATH. herdr's `agent.start`
+  has no gjc kind, so like omo it is typed into the new pane's shell and the pane counts as
+  started once gjc is its foreground process
+  ([#220](https://github.com/devswha/herdr-web-ui/pull/220)).
+- OmO panes show their agent mark in the sidebar even when herdr reports no agent kind,
+  including panes started with OmO in the new-session dialog. Detection uses the pane's
+  foreground processes, not its title, so ordinary shells remain shells
+  ([#224](https://github.com/devswha/herdr-web-ui/pull/224) by @beomq).
+- A bridge that died without withdrawing its registration (a crash or a reboot) no longer
+  makes the reconnect verify the dead one before the new bridge has registered
+  ([#227](https://github.com/devswha/herdr-web-ui/pull/227)).
+
+## [0.3.37] - 2026-10-01
+
+### Changed
+- Settings → Appearance no longer offers Clawd and the Codex app icon in place of the
+  provider logos. Claude and Codex panes show their provider logos again, also where one of
+  the icons was chosen in 0.3.36. The color palettes stay
+  ([#219](https://github.com/devswha/herdr-web-ui/pull/219)).
+- The chat's status line no longer has **Report a problem**, and on a phone no **Hide keyboard**
+  while typing. A tap on the transcript or a drag down it still puts the keyboard away. Problems
+  go to [GitHub issues](https://github.com/devswha/herdr-web-ui/issues/new/choose)
+  ([#221](https://github.com/devswha/herdr-web-ui/pull/221)).
+- On a touch screen, the chip above the message box that takes Claude Code's suggested next
+  prompt is now off until Settings → Composer → **Suggestion chip** turns it on. The suggestion
+  still stands as the box's placeholder, and Tab still takes it with a keyboard
+  ([#223](https://github.com/devswha/herdr-web-ui/pull/223)).
+## [0.3.36] - 2026-10-01
+
+### Added
+- On a phone, a swipe in from the left edge opens the workspace list and a swipe to the left
+  closes it; a stroke on a text field or one that selects text is left alone. While typing in
+  the chat, a tap on the transcript, a drag down it, or the new **Hide keyboard** button puts
+  the keyboard away to read, and the draft stays in the composer
+  ([#187](https://github.com/devswha/herdr-web-ui/pull/187) by @Haeminway1, [#217](https://github.com/devswha/herdr-web-ui/pull/217)).
 - Settings → Appearance → Colors offers two opt-in palettes beside herdr's amber, which stays
   the default: **Dark report** (a near-black blue-grey canvas, hairlines, near-square corners,
   white primary actions, electric blue only on small marks, and amber / red / green agent states)
@@ -18,32 +157,39 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
   default ([#188](https://github.com/devswha/herdr-web-ui/pull/188) by @Haeminway1).
 - The chat's message box offers the prompt Claude Code suggests next, the grey text in its
   empty input. It stands as the box's placeholder, and Tab takes it into the box; on a touch
-  screen a dashed chip above the box does the same. Nothing is sent until you send it.
+  screen a dashed chip above the box does the same. Nothing is sent until you send it. It is
+  read only while Claude waits for a prompt and never holds up the chat for more than 1.5s
+  ([#198](https://github.com/devswha/herdr-web-ui/pull/198) by @Yoonwoo-Ha, [#216](https://github.com/devswha/herdr-web-ui/pull/216)).
 - Settings → Plan limits → Where puts the plan meters at the top of the sidebar instead of
   beside Settings: a row per account with its plan, the limit closest to running out, a bar
   and when it resets. A tap opens every limit. An account whose numbers are old or missing (a
-  sign-in expired, a provider asking to slow down) dims them and says why in its row.
+  sign-in expired, a provider asking to slow down) dims them and says why in its row
+  ([#206](https://github.com/devswha/herdr-web-ui/pull/206) by @Haeminway1, [#217](https://github.com/devswha/herdr-web-ui/pull/217)).
 
 ### Fixed
 - A table an agent indents under a list item shows as a table in that item in the chat. It was
   read as the item's text, so its rows ran together on one line with their pipes. The list goes
-  on after it: items numbered `1.` throughout keep counting, and nested items stay nested.
-- On a phone, the edge swipe that opens the workspace list leaves text alone: a stroke that
-  starts on a text field, while text is selected, or that starts selecting text no longer opens
-  or closes the list.
+  on after it: items numbered `1.` throughout keep counting, and nested items stay nested
+  ([#209](https://github.com/devswha/herdr-web-ui/pull/209) by @Yoonwoo-Ha, [#217](https://github.com/devswha/herdr-web-ui/pull/217)).
 - `stop` (herdr's Stop action, `bun scripts/plugin.ts stop`) returns once the server is gone.
   It returned at once, while the old supervisor still held the checkout's lock, so a `start`
   right after it found that lock and gave up: nothing ran, and it reported no answer after 20s.
+  On Linux, a server that has exited but whose parent has not yet collected it counts as gone
+  ([#210](https://github.com/devswha/herdr-web-ui/pull/210) by @Yoonwoo-Ha, [#216](https://github.com/devswha/herdr-web-ui/pull/216)).
 - A pane herdr reports waiting for input gets a card in the chat even when no reader knows its
-  screen (Codex's collapsed question queue keeps its own handling). A numbered menu that still
-  takes the answer is offered as its options, each answered by typing its number; anything
-  else shows the screen's last lines with Enter and Esc, plus Yes and No for a `(y/n)` prompt
+  screen (Codex's collapsed question queue keeps its own handling). A numbered menu whose hint
+  (a way to choose, such as "Enter to select") is the screen's last line is offered as its
+  options, each answered by typing its number, with wrapped labels in full and Enter and Esc
+  after them; anything else, such as a new prompt under
+  the hint, shows the screen's last lines with Enter and Esc, plus Yes and No for a `(y/n)` prompt
   and arrows when its hint names them. An answer to a changed screen is refused. Each such
-  wait is logged once.
+  wait is logged once ([#205](https://github.com/devswha/herdr-web-ui/pull/205) by @Haeminway1, [#216](https://github.com/devswha/herdr-web-ui/pull/216)).
 - **Add PC** on a Windows host now says that Windows hosts are not supported yet, instead of
-  failing with the host shell's "'sh' is not recognized" (#189).
+  failing with the host shell's "'sh' is not recognized" ([#208](https://github.com/devswha/herdr-web-ui/pull/208), [#189](https://github.com/devswha/herdr-web-ui/issues/189)).
 - A pane waiting for another web bridge no longer frees its input for a moment and reports the
-  wait twice when herdr's refusal of a retry arrives slowly (a busy PC).
+  wait twice when herdr's refusal of a retry arrives slowly (a busy PC). It keeps waiting and
+  tries again instead, however late that refusal's exit is
+  ([#207](https://github.com/devswha/herdr-web-ui/pull/207) by @Haeminway1, [#216](https://github.com/devswha/herdr-web-ui/pull/216)).
 - In the terminal, **Ctrl+Shift+↑/↓** only switches panes. It no longer also types `ESC[1;6A` /
   `ESC[1;6B` into the pane it switched to ([#215](https://github.com/devswha/herdr-web-ui/pull/215)).
 - On a wide screen, the quick replies above the message box line up with the box instead of
@@ -70,7 +216,7 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
   herdr reported the pane INPUT, but no card appeared. An answer presses Enter only once the
   cursor is on the row it answers; a menu whose rows cannot be told apart gets no card.
 - The iPhone home-screen app starts below the status bar instead of drawing beneath it, so the
-  header text is no longer blurred on iOS 27 (#164). iOS reads this when the app is added, so an
+  header text is no longer blurred on iOS 27 ([#199](https://github.com/devswha/herdr-web-ui/pull/199) by @Yoonwoo-Ha). iOS reads this when the app is added, so an
   existing install keeps the blur until it is removed from the Home Screen and added again; send
   or copy unsent drafts and queued messages first. See [the testing guide](docs/ios-home-screen-testing.md).
 - A Codex pane no longer reads RUN for good after its first turn. herdr reports Codex as
@@ -94,10 +240,6 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
 ## [0.3.34] - 2026-09-30
 
 ### Added
-- On a phone, a swipe in from the left edge opens the workspace list and a swipe to the left
-  closes it.
-- While typing in the chat on a phone, a tap on the transcript, a drag down it, or the new
-  **Hide keyboard** button puts the keyboard away to read; the draft stays in the composer.
 - A pane herdr could not restore after a restart (herdr 0.9.3+, e.g. its folder was
   removed) is marked NOT RESTORED in the sidebar, and selecting it shows herdr's reason
   instead of a terminal that ends at once. The server no longer tries to attach it.
@@ -180,7 +322,7 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
 - A terminal attach whose helper process could not start (for example, `node` missing from
   PATH) no longer leaves the pane half-open. The pane stayed blank for the next device, and
   closing that device crashed the server. The attach now reports the error, the failure is
-  written to the server log, and the pane can be opened again (#154).
+  written to the server log, and the pane can be opened again ([#155](https://github.com/devswha/herdr-web-ui/pull/155)).
 - The installed app on Android follows the phone's auto-rotate setting. With rotation
   locked it no longer turns sideways when the phone is tilted. The service worker no
   longer serves a cached web manifest, so Chrome sees this change and updates the
@@ -675,7 +817,7 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
   retry. On an idle Codex pane, the transcript match's 400-line read makes herdr scroll the
   history back, which takes about a second or more. The attach is now retried for as long as
   such a read can last, and a refused attach no longer prints herdr's message into the terminal.
-  (#45, by @Yoonwoo-Ha)
+  ([#45](https://github.com/devswha/herdr-web-ui/pull/45) by @Yoonwoo-Ha)
 - An omo or gjc pane that finishes while you are not looking at it reads **DONE** (and alerts),
   not READY, and reads RUN while it works. herdr recognises these agents from their screen and
   processes; omo's label turns from `pi` to `claude` mid-turn, so herdr reported the whole turn
@@ -687,10 +829,10 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
 ### Added
 - Answer an agent's waiting prompt from the chat's message box: type an option's number or your
   own answer. A pick for an approval, a plan or a menu waits in the prompt card for **Confirm**,
-  and the options are numbered to match. (#6, by @Yoonwoo-Ha)
+  and the options are numbered to match ([#6](https://github.com/devswha/herdr-web-ui/pull/6) by @Yoonwoo-Ha).
 - Codex's queued questions (the collapsed "? N questions" block) show as a card and are answered
   from the chat; the queue closes again afterwards, so messages still reach Codex. Prompts of
-  Claude Code 2.1 and Codex 0.156 are recognised. (#6)
+  Claude Code 2.1 and Codex 0.156 are recognised ([#6](https://github.com/devswha/herdr-web-ui/pull/6) by @Yoonwoo-Ha).
 - **Browse** beside the directory field of a new session: pick the folder from a list instead of
   typing its path. It lists one folder at a time on the PC the session starts on, hidden folders
   on request. A remote PC offers it once its bridge is updated; until then, type the path.
@@ -898,7 +1040,16 @@ First public version.
 - Installable PWA, a mobile key bar, web push alerts and optional token auth.
 - Distribution as a herdr plugin.
 
-[Unreleased]: https://github.com/devswha/herdr-web-ui/compare/v0.3.30...HEAD
+[Unreleased]: https://github.com/devswha/herdr-web-ui/compare/v0.3.39...HEAD
+[0.3.39]: https://github.com/devswha/herdr-web-ui/compare/v0.3.38...v0.3.39
+[0.3.38]: https://github.com/devswha/herdr-web-ui/compare/v0.3.37...v0.3.38
+[0.3.37]: https://github.com/devswha/herdr-web-ui/compare/v0.3.36...v0.3.37
+[0.3.36]: https://github.com/devswha/herdr-web-ui/compare/v0.3.35...v0.3.36
+[0.3.35]: https://github.com/devswha/herdr-web-ui/compare/v0.3.34...v0.3.35
+[0.3.34]: https://github.com/devswha/herdr-web-ui/compare/v0.3.33...v0.3.34
+[0.3.33]: https://github.com/devswha/herdr-web-ui/compare/v0.3.32...v0.3.33
+[0.3.32]: https://github.com/devswha/herdr-web-ui/compare/v0.3.31...v0.3.32
+[0.3.31]: https://github.com/devswha/herdr-web-ui/compare/v0.3.30...v0.3.31
 [0.3.30]: https://github.com/devswha/herdr-web-ui/compare/v0.3.29...v0.3.30
 [0.3.29]: https://github.com/devswha/herdr-web-ui/compare/v0.3.28...v0.3.29
 [0.3.28]: https://github.com/devswha/herdr-web-ui/compare/v0.3.27...v0.3.28

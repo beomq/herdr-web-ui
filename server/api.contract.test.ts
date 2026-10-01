@@ -5,7 +5,7 @@ import { basename, join } from "node:path";
 import { createServer } from "./index.ts";
 import type { AgentKind, AgentStatus, ApiError, HealthAuth, PushKey, RemoteAccess, SessionSnapshot, PaneReadResult, UsageReport, WorkspaceCreated } from "../shared/protocol.ts";
 import { UsageService } from "./usage.ts";
-import { herdrRpc, workspaceCreate, workspaceClose } from "./herdr/client.ts";
+import { herdrRpc, ping, workspaceCreate, workspaceClose } from "./herdr/client.ts";
 import { startFakePushService, type FakePushService } from "./push.fake.ts";
 
 /**
@@ -159,6 +159,23 @@ describe("workspace and discovery endpoints", () => {
     expect(agents.some((agent) => agent.kind === "claude")).toBeTrue();
     expect(agents.some((agent) => agent.kind === "omp")).toBeTrue();
     expect(agents.map((agent) => agent.label)).toEqual([...agents.map((agent) => agent.label)].sort((a, b) => a.localeCompare(b)));
+  });
+
+  it("offers omo and gjc, which herdr cannot start, exactly when they are on PATH", async () => {
+    const bin = mkdtempSync(join(tmpdir(), "herdr-web-ui-shell-agents-"));
+    const path = process.env["PATH"];
+    const kinds = async () => ((await (await fetch(`${base()}/api/agents`)).json()) as { agents: AgentKind[] }).agents;
+    try {
+      process.env["PATH"] = bin;
+      expect((await kinds()).map((agent) => agent.kind)).not.toContain("gjc");
+      for (const name of ["omo", "gjc"]) writeFileSync(join(bin, name), "#!/bin/sh\n", { mode: 0o755 });
+      const offered = await kinds();
+      expect(offered).toContainEqual({ kind: "omo", label: "OmO" });
+      expect(offered).toContainEqual({ kind: "gjc", label: "Gajae Code" });
+    } finally {
+      process.env["PATH"] = path;
+      rmSync(bin, { recursive: true, force: true });
+    }
   });
 
   it("rejects a workspace cwd that is not an existing directory", async () => {
@@ -1185,6 +1202,19 @@ describe("pairing and identity", () => {
     expect((await fetch(`${base()}/api/session`, { headers: proxied() })).status).toBe(401);
   });
 
+  it("does not take a proxied request for this PC when the proxy sends no X-Forwarded-For", async () => {
+    // a proxy that keeps the browser's Host, or sends only another forwarding header
+    expect(await auth({ host: "app.example.test" })).toMatchObject({ authenticated: false, reason: "pairing_required" });
+    expect((await fetch(`${base()}/api/session`, { headers: { host: "app.example.test" } })).status).toBe(401);
+    for (const name of ["x-forwarded-proto", "x-forwarded-host", "x-real-ip", "forwarded", "via"]) {
+      expect(await auth({ [name]: "https" })).toMatchObject({ authenticated: false, reason: "pairing_required" });
+    }
+    // this PC under its other names is still this PC
+    for (const host of [`localhost:${open.port}`, `herdr.localhost:${open.port}`, "localhost:5173"]) {
+      expect(await auth({ host })).toMatchObject({ authenticated: true, via: "local" });
+    }
+  });
+
   it("trusts the PC's own Tailscale login and refuses another", async () => {
     expect(await auth(proxied(OWNER))).toMatchObject({ authenticated: true, via: "tailscale" });
     expect(await auth(proxied("Owner@Example.com"))).toMatchObject({ authenticated: true, via: "tailscale" });
@@ -1339,8 +1369,10 @@ describe("token auth", () => {
   it("keeps /api/health public and advertises the gate state", async () => {
     const res = await fetch(`${securedBase()}/api/health`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean; auth: HealthAuth };
+    const body = (await res.json()) as { ok: boolean; auth: HealthAuth; herdr: { version: string; protocol: number; terminal_attach?: boolean } };
     expect(body.auth).toEqual({ required: true, authenticated: false, reason: "token_required" });
+    // a Unix herdr attaches terminals; Windows PCs report false and open in the chat lens
+    expect(body.herdr.terminal_attach).toBe(true);
   });
 
   it("refuses a token that does not match", async () => {
@@ -1496,6 +1528,37 @@ describe("PC management API", () => {
       const health = await fetch(`http://localhost:${gated.port}/api/health?scope=bridge`).then((r) => r.json()) as { auth: HealthAuth };
       expect(health.auth).toEqual({ required: true, authenticated: false, reason: "token_required" });
     } finally { gated.stop(); rmSync(stateDir, { recursive: true, force: true }); }
+  });
+});
+
+describe("terminal lens of a bridge without the PTY sidecar", () => {
+  const TOKEN = "sidecar-test-secret";
+  /** what /api/health and /api/bridge tell of herdr, from a bridge whose runtime has the sidecar or lacks it */
+  const told = async (sidecar: boolean) => {
+    const dir = mkdtempSync(join(tmpdir(), "herdr-web-ui-sidecar-"));
+    const bridge = createServer({ port: 0, stateDir: dir, token: TOKEN, machines: false, sidecar });
+    try {
+      const get = async (path: string) => {
+        const response = await fetch(`http://localhost:${bridge.port}${path}`, { headers: { authorization: `Bearer ${TOKEN}` } });
+        expect(response.status).toBe(200);
+        return (await response.json()) as { herdr: unknown };
+      };
+      return { health: (await get("/api/health")).herdr, bridge: (await get("/api/bridge")).herdr };
+    } finally { bridge.stop(); rmSync(dir, { recursive: true, force: true }); }
+  };
+
+  it("reports a mirror from /api/health and /api/bridge though herdr itself can attach", async () => {
+    const herdr = await ping();
+    // the case only means something against a herdr that can attach
+    expect(herdr.terminal_attach).toBe(true);
+    const mirrored = { ...herdr, terminal_attach: false, terminal_mirror: true };
+    expect(await told(false)).toEqual({ health: mirrored, bridge: mirrored });
+  });
+
+  it("passes herdr's own answer through where the sidecar runs", async () => {
+    const herdr = await ping();
+    expect(herdr).not.toHaveProperty("terminal_mirror");
+    expect(await told(true)).toEqual({ health: herdr, bridge: herdr });
   });
 });
 

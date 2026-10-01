@@ -368,6 +368,14 @@ const Turn = memo(function Turn({ paneId, turn, live, last, showThinking }: Turn
       <div className="chat-compact-text"><Markdown>{compact.text}</Markdown></div>
     </details>;
   }
+  // the runtime spoke, not the user: a quiet divider like a compaction, the text on request
+  const notice = turn.parts.find((part): part is Extract<ConversationPart, { kind: "notice" }> => part.kind === "notice");
+  if (notice !== undefined) {
+    return <details className="chat-compact chat-notice">
+      <summary>{t("Background result delivered")}{time !== null && <> · <time dateTime={turn.ts ?? undefined}>{time}</time></>}</summary>
+      <pre className="chat-compact-text chat-notice-text">{notice.text}</pre>
+    </details>;
+  }
   if (turn.role === "user") {
     const text = turn.parts.filter((part): part is Extract<ConversationPart, { kind: "text" }> => part.kind === "text").map((part) => part.text).join("\n\n");
     return <article className="chat-turn chat-turn-user">
@@ -719,7 +727,12 @@ export const ChatView = memo(function ChatView({ paneId, refreshKey, sentKey = 0
       {error !== null && <p className="chat-inline-state chat-inline-error" role="alert">{errorStatus === 401 ? "locked — the token gate is asking again" : error}</p>}
       {!loaded && error === null && <p className="chat-inline-state" role="status">{t("Loading conversation…")}</p>}
       {loaded && empty && error === null && prompt === null && <div className="chat-empty"><AgentMark agent={agent ?? "agent"} size={32} /><p>{t("No conversation yet — say something below")}</p></div>}
-      {prompt !== null && <PromptCard paneId={paneId} prompt={prompt} typedAnswer={pendingAnswer?.promptId === prompt.id ? pendingAnswer.answer : null} onTypedAnswerDone={onPendingAnswerDone} onPromptChanged={() => setPromptPollKey((key) => key + 1)} onAnswered={() => { setPrompt(null); onPendingAnswerDone?.(); }} />}
+      {prompt !== null && <PromptCard paneId={paneId} prompt={prompt} typedAnswer={pendingAnswer?.promptId === prompt.id ? pendingAnswer.answer : null} onTypedAnswerDone={onPendingAnswerDone} onPromptChanged={() => setPromptPollKey((key) => key + 1)} onAnswered={() => {
+        setPrompt(null);
+        // a form of several questions goes on to its next one: read it now, not at the next poll
+        if (prompt.steps) setPromptPollKey((key) => key + 1);
+        onPendingAnswerDone?.();
+      }} />}
       {ended && <p className="chat-endcap">{t("terminal ended")}</p>}
     </div>
     {newMessages ? <button type="button" className="btn chat-new-messages" onClick={scrollToBottom}>{t("New messages")} <ArrowDown aria-hidden="true" /></button>

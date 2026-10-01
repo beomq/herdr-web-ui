@@ -8,7 +8,7 @@ import type { AgentKind, ClientMessage, ClientRole, HealthAuth, HerdrPane, Serve
 import { paneTitle } from "../shared/notify-policy.ts";
 import { DEFAULT_PORT } from "../shared/protocol.ts";
 import { DEVICE_COOKIE, handleAuthRequest, isAuthenticated, parseCookies, requiresAuth, unauthorizedJson } from "./auth.ts";
-import { decideAccess, isLoopbackAddress } from "./access.ts";
+import { cameThroughProxy, decideAccess, isLoopbackAddress } from "./access.ts";
 import { DeviceStore, handleDeviceRequest } from "./devices.ts";
 import { remoteAccess, tailscaleOwner } from "./tailscale.ts";
 import { paneCommands } from "./commands.ts";
@@ -18,7 +18,7 @@ import { serveStatic } from "./static.ts";
 import { startStatusCollector } from "./collector.ts";
 import { conversationImage, ConversationUnavailable, HistoryChanged, labelOmoPanes, paneConversation, toolOutput } from "./conversation.ts";
 import { CompletionTracker } from "./completion.ts";
-import { startOmo } from "./omo.ts";
+import { SHELL_AGENTS, isShellAgentKind, shellAgentExecutable, startShellAgent } from "./shell-agent.ts";
 import { listDirectories } from "./directories.ts";
 import { fileResponse, locateFile } from "./file-view.ts";
 import {
@@ -47,6 +47,8 @@ import { codexQuestionsCollapsed, handlePromptRequest } from "./prompt.ts";
 import { secretPrompt, validSecret } from "../shared/secret-prompt.ts";
 import { PasteImageError, savePaneImage } from "./paste.ts";
 import { PtySession } from "./pty/session.ts";
+import { attachableIdentity, sidecarAvailable } from "./pty/sidecar.ts";
+import { MirrorSession } from "./mirror.ts";
 import { OutputWindow, OUTPUT_HIGH_BYTES, OUTPUT_HARD_BYTES, OUTPUT_STALL_MS, ReplayBuffer } from "./output-window.ts";
 import { OUTPUT_STALLED_CLOSE_CODE } from "../shared/terminal-flow.ts";
 import { connectUpdater, handleUpdateRequest, type UpdateService } from "./update-api.ts";
@@ -79,6 +81,14 @@ const ATTACH_RETRY_MS = 50;
 const ATTACH_RETRY_MAX_MS = 500;
 /** a refused attach says so within milliseconds of its first bytes: those are held this long */
 const ATTACH_HOLD_MS = 100;
+/**
+ * What `herdr terminal attach` writes itself before herdr has answered: terminal modes set and
+ * reset only (mouse reporting off, the alternate screen on; the last one maybe cut short). The
+ * answer can come any time after them, later than the hold on a busy PC, so they say nothing
+ * about whether the attach took and do not start the hold. A refusal and a screen both begin
+ * with something else.
+ */
+const ATTACH_PREAMBLE_RE = /^(?:\x1b\[\?[\d;]+[hl])*(?:\x1b(?:\[(?:\?[\d;]*)?)?)?$/;
 /** how often a terminal another web bridge holds is tried again, while clients here still want it */
 const ATTACH_HELD_RETRY_MS = 3_000;
 /**
@@ -115,6 +125,7 @@ const AGENT_LABELS: Record<string, string> = {
   codex: "Codex",
   omp: "Oh My Pi",
   omo: "OmO",
+  gjc: "Gajae Code",
   pi: "pi",
   gemini: "Gemini CLI",
   cursor: "Cursor",
@@ -164,7 +175,9 @@ type Client = ServerWebSocket<SocketData>;
  * keeps screen state and selection, while herdr owns scrollback.
  */
 interface PaneAttachment {
-  pty: PtySession;
+  pty: PtySession | MirrorSession;
+  /** set when herdr cannot attach here: `pty` repaints the pane's screen (server/mirror.ts), on the pane's own grid */
+  mirror?: MirrorSession;
   clients: Set<Client>;
   /** the pty's current grid: interact clients set it, observe clients adopt it */
   cols: number;
@@ -222,9 +235,23 @@ export function createServer(
     attachRetryForMs?: number;
     /** ATTACH_HELD_RETRY_MS; tests shorten it */
     attachHeldRetryMs?: number;
+    /** whether herdr can `terminal attach`; unset, its ping says, and this runtime's PTY sidecar has to be runnable. Tests give a Windows herdr's answer, at once or as late as a ping's. */
+    terminalAttach?: boolean | (() => Promise<boolean>);
+    /** whether this runtime can run the PTY sidecar; unset, server/pty/sidecar.ts says. Tests give a runtime without Node or node-pty, while herdr keeps its own answer. */
+    sidecar?: boolean;
   } = {},
 ): { port: number; hostname: string; stop: () => void } {
   const attachments = new Map<string, PaneAttachment>();
+  /** whether this bridge can `terminal attach`: herdr is asked once, and the PTY sidecar has to be runnable here (server/pty/sidecar.ts) */
+  /** whether the sidecar can run, settled as the server starts so that attach, /api/health and /api/bridge tell one answer; a forced answer (tests) stands in for it */
+  const sidecar = options.sidecar ?? (options.terminalAttach === undefined ? sidecarAvailable() : options.terminalAttach !== false);
+  let terminalAttachKnown: boolean | null = typeof options.terminalAttach === "boolean" ? options.terminalAttach : null;
+  const terminalAttach = async (): Promise<boolean> => {
+    if (terminalAttachKnown === null) {
+      terminalAttachKnown = typeof options.terminalAttach === "function" ? await options.terminalAttach() : attachableIdentity(await ping(), sidecar).terminal_attach !== false;
+    }
+    return terminalAttachKnown;
+  };
   const retryFor = options.attachRetryForMs ?? ATTACH_RETRY_FOR_MS;
   const heldRetry = options.attachHeldRetryMs ?? ATTACH_HELD_RETRY_MS;
   /** attachments still resolving their terminal, so concurrent attaches share one pty */
@@ -427,7 +454,8 @@ export function createServer(
 
   function resizePty(paneId: string, cols: number, rows: number): void {
     const attachment = attachments.get(paneId);
-    if (!attachment || (attachment.cols === cols && attachment.rows === rows)) return;
+    // a mirrored pane's grid is herdr's own: no browser resizes it
+    if (!attachment || attachment.mirror || (attachment.cols === cols && attachment.rows === rows)) return;
     attachment.cols = cols;
     attachment.rows = rows;
     attachment.pty.resize(cols, rows);
@@ -450,12 +478,13 @@ export function createServer(
 
   async function spawnAttachment(paneId: string, cols: number, rows: number, forObserver: boolean): Promise<PaneAttachment> {
     await retiringAttachments.get(paneId);
+    const mirrored = !(await terminalAttach());
     const { terminalId, rect } = await terminalInfoFor(paneId);
     // an observer-first attachment spawns at the pane's own grid (fallback 80x24 when
     // the layout has no rect for it): the attach must not seed the shared pty with a
     // watching phone's viewport
-    const spawnCols = forObserver ? (rect?.width ?? 80) : cols;
-    const spawnRows = forObserver ? (rect?.height ?? 24) : rows;
+    const spawnCols = forObserver || mirrored ? (rect?.width ?? 80) : cols;
+    const spawnRows = forObserver || mirrored ? (rect?.height ?? 24) : rows;
     const attachment: PaneAttachment = {
       pty: undefined as unknown as PtySession,
       clients: new Set<Client>(),
@@ -465,6 +494,39 @@ export function createServer(
       stalled: new Map(),
     };
     attachments.set(paneId, attachment);
+
+    if (mirrored) {
+      const mirror = new MirrorSession({
+        cols: spawnCols,
+        rows: spawnRows,
+        size: async () => {
+          const now = (await terminalInfoFor(paneId)).rect;
+          return now ? { cols: now.width, rows: now.height } : null;
+        },
+        // the grid follows herdr's layout: the clients adopt the new size before the screen
+        onResize: (cols, rows) => {
+          if (attachments.get(paneId) !== attachment) return;
+          attachment.cols = cols;
+          attachment.rows = rows;
+          broadcast(paneId, { type: "pane-geometry", pane_id: paneId, cols, rows, fixed: true });
+        },
+        read: async () => (await paneRead({ paneId, source: "visible", format: "ansi" })).text,
+        write: (data) => paneSendText(paneId, data),
+        onData: (frame) => {
+          if (attachments.get(paneId) !== attachment) return;
+          for (const client of attachment.clients) sendOutput(client, paneId, frame);
+          reconcileOutput(paneId);
+        },
+        onExit: (code) => {
+          if (attachments.get(paneId) !== attachment) return;
+          broadcast(paneId, { type: "pty-exit", pane_id: paneId, code });
+          closeAttachment(paneId);
+        },
+      });
+      attachment.pty = mirror;
+      attachment.mirror = mirror;
+      return attachment;
+    }
 
     // No --takeover: another web bridge may own the exclusive attach slot.
     // Report that conflict without displacing it or the user's own TUI.
@@ -487,7 +549,10 @@ export function createServer(
       // is dropped then, never painted into the clients' terminal
       let held: string | null = "";
       let heldSince = 0;
+      let holding = false;
       let holdTimer: ReturnType<typeof setTimeout> | undefined;
+      /** ended before its exit came: what it still prints is no attach's */
+      let retired = false;
       const release = (): void => {
         clearTimeout(holdTimer);
         if (held === null) return;
@@ -499,11 +564,18 @@ export function createServer(
         // a closed attachment's kill skips onExit, which would clear this timer: a newer
         // attachment on the pane must not hear this one's resume
         if (attachments.get(paneId) !== attachment) return;
-        // a refusal whose exit comes late (a busy PC) is not an attach: onExit handles it, and
-        // resuming here would free the input, then report attach_held a second time. A pane
-        // whose own output only ends like one is painted once that exit is overdue.
-        if (ATTACH_REFUSING_RE.test(output) && Date.now() - heldSince < ATTACH_REFUSAL_EXIT_MS) {
-          holdTimer = setTimeout(took, ATTACH_HOLD_MS);
+        // a refusal whose exit comes late (a busy PC) is not an attach: resuming would free
+        // the input to a pane another bridge may hold. Only output after it is an attach's.
+        if (ATTACH_REFUSING_RE.test(output)) {
+          if (Date.now() - heldSince < ATTACH_REFUSAL_EXIT_MS) {
+            holdTimer = setTimeout(took, ATTACH_HOLD_MS);
+            return;
+          }
+          // its exit is overdue: this try ends here, as that exit would have ended it (a pane
+          // whose own output ends the same way waits for more output on a later try)
+          retired = true;
+          session.kill();
+          ended(null);
           return;
         }
         // the attach took: a pane that waited for another bridge is this bridge's again
@@ -513,7 +585,60 @@ export function createServer(
         }
         release();
       };
-      return new PtySession({
+      const ended = (code: number | null): void => {
+        clearTimeout(holdTimer);
+        if (attachments.get(paneId) !== attachment) return;
+        const now = Date.now();
+        if (code !== 0 && ATTACH_READ_RACE_RE.test(output) && now - (refusedSince ??= now) < retryFor) {
+          held = null;
+          retries += 1;
+          setTimeout(() => {
+            if (attachments.get(paneId) !== attachment) return;
+            try {
+              attachment.pty = start();
+            } catch (error) {
+              // a throw here is uncaught and takes the whole server down: end this
+              // pane's terminal instead, on the exited pty the record still holds
+              const message = spawnFailure(paneId, error);
+              broadcast(paneId, { type: "error", code: "command_failed", message });
+              broadcast(paneId, { type: "pty-exit", pane_id: paneId, code: null });
+              closeAttachment(paneId);
+            }
+          }, Math.min(ATTACH_RETRY_MS * 2 ** (retries - 1), ATTACH_RETRY_MAX_MS));
+          return;
+        }
+        if (code !== 0 && ATTACH_HELD_RE.test(output)) {
+          held = null; // herdr's refusal is not the pane's output: never painted, and it repeats
+          // waiting for the other bridge is not a read race: the next one gets its full budget
+          refusedSince = null;
+          retries = 0;
+          // Another web bridge holds herdr's one attach slot (two bridges on one herdr, e.g. a
+          // second install beside the first). Its attach is left alone; this pane waits for it
+          // to let go, trying again while anyone here still has it open, instead of ending.
+          if (!attachment.held) broadcast(paneId, { type: "error", code: "attach_held", message: ATTACH_HELD_MESSAGE, pane_id: paneId });
+          attachment.held = true;
+          attachment.heldRetry = setTimeout(() => {
+            if (attachments.get(paneId) !== attachment) return;
+            if (attachment.clients.size === 0) {
+              closeAttachment(paneId);
+              return;
+            }
+            try {
+              attachment.pty = start();
+            } catch (error) {
+              const message = spawnFailure(paneId, error);
+              broadcast(paneId, { type: "error", code: "command_failed", message });
+              broadcast(paneId, { type: "pty-exit", pane_id: paneId, code: null });
+              closeAttachment(paneId);
+            }
+          }, heldRetry);
+          return;
+        }
+        release();
+        broadcast(paneId, { type: "pty-exit", pane_id: paneId, code });
+        closeAttachment(paneId);
+      };
+      const session = new PtySession({
         command: process.env["HERDR_WEB_HERDR_BIN"] || "herdr",
         args: ["terminal", "attach", terminalId],
         // herdr's CLI reads HERDR_SOCKET_PATH, not HERDR_SOCKET: the stream must reach
@@ -523,69 +648,19 @@ export function createServer(
         cols: attachment.cols,
         rows: attachment.rows,
         onData: (data) => {
-          if (attachments.get(paneId) !== attachment) return;
+          if (retired || attachments.get(paneId) !== attachment) return;
           output = (output + data).slice(-1024);
           if (held === null) return forward(data);
-          if (held === "") {
+          held += data;
+          if (!holding && !ATTACH_PREAMBLE_RE.test(held)) {
+            holding = true;
             heldSince = Date.now();
             holdTimer = setTimeout(took, ATTACH_HOLD_MS);
           }
-          held += data;
         },
-        onExit: (code) => {
-          clearTimeout(holdTimer);
-          if (attachments.get(paneId) !== attachment) return;
-          const now = Date.now();
-          if (code !== 0 && ATTACH_READ_RACE_RE.test(output) && now - (refusedSince ??= now) < retryFor) {
-            held = null;
-            retries += 1;
-            setTimeout(() => {
-              if (attachments.get(paneId) !== attachment) return;
-              try {
-                attachment.pty = start();
-              } catch (error) {
-                // a throw here is uncaught and takes the whole server down: end this
-                // pane's terminal instead, on the exited pty the record still holds
-                const message = spawnFailure(paneId, error);
-                broadcast(paneId, { type: "error", code: "command_failed", message });
-                broadcast(paneId, { type: "pty-exit", pane_id: paneId, code: null });
-                closeAttachment(paneId);
-              }
-            }, Math.min(ATTACH_RETRY_MS * 2 ** (retries - 1), ATTACH_RETRY_MAX_MS));
-            return;
-          }
-          if (code !== 0 && ATTACH_HELD_RE.test(output)) {
-            held = null; // herdr's refusal is not the pane's output: never painted, and it repeats
-            // waiting for the other bridge is not a read race: the next one gets its full budget
-            refusedSince = null;
-            retries = 0;
-            // Another web bridge holds herdr's one attach slot (two bridges on one herdr, e.g. a
-            // second install beside the first). Its attach is left alone; this pane waits for it
-            // to let go, trying again while anyone here still has it open, instead of ending.
-            if (!attachment.held) broadcast(paneId, { type: "error", code: "attach_held", message: ATTACH_HELD_MESSAGE, pane_id: paneId });
-            attachment.held = true;
-            attachment.heldRetry = setTimeout(() => {
-              if (attachments.get(paneId) !== attachment) return;
-              if (attachment.clients.size === 0) {
-                closeAttachment(paneId);
-                return;
-              }
-              try {
-                attachment.pty = start();
-              } catch (error) {
-                const message = spawnFailure(paneId, error);
-                broadcast(paneId, { type: "error", code: "command_failed", message });
-                broadcast(paneId, { type: "pty-exit", pane_id: paneId, code: null });
-                closeAttachment(paneId);
-              }
-            }, heldRetry);
-            return;
-          }
-          release();
-          broadcast(paneId, { type: "pty-exit", pane_id: paneId, code });
-          closeAttachment(paneId);
-        },
+        onExit: ended,
       });
+      return session;
     };
     try {
       attachment.pty = start();
@@ -672,7 +747,7 @@ export function createServer(
       const ip = bunServer.requestIP(request);
       const access = decideAccess({
         loopback: ip !== null && isLoopbackAddress(ip.address),
-        forwarded: request.headers.has("x-forwarded-for"),
+        forwarded: cameThroughProxy(request.headers),
         funnel: request.headers.has("tailscale-funnel-request"),
         tailscaleLogin: request.headers.get("tailscale-user-login"),
         tokenMatched: token !== "" && isAuthenticated(request, token),
@@ -705,7 +780,7 @@ export function createServer(
 
       if (pathname === "/api/bridge") {
         if (token === "" && !bridgeAuthorized) return unauthorizedJson();
-        try { return jsonResponse(await bridgeIdentity()); } catch (error) { return errorResponse(error); }
+        try { return jsonResponse(await bridgeIdentity(sidecar)); } catch (error) { return errorResponse(error); }
       }
       if (pathname === "/api/machines" || pathname.startsWith("/api/machines/")) {
         if (!machines) return jsonResponse({ error: { code: "bridge_only", message: "Manage PCs on the connection server" } }, 404);
@@ -783,7 +858,9 @@ export function createServer(
         if (url.searchParams.get("scope") === "bridge") return jsonResponse({ ok: true, auth, bridge_protocol: BRIDGE_PROTOCOL });
         try {
           const info = await ping();
-          return jsonResponse({ ok: true, herdr: { version: info.version, protocol: info.protocol }, auth,
+          // a forced answer (tests) and a runtime without the PTY sidecar are told the way a Windows herdr's own would be
+          const herdr = attachableIdentity(info, sidecar);
+          return jsonResponse({ ok: true, herdr, auth,
             web_ui: { boot_id: process.env["HERDR_WEB_BOOT_ID"] ?? null, revision: process.env["HERDR_WEB_REVISION"] ?? null } });
         } catch (error) {
           return errorResponse(error);
@@ -809,8 +886,8 @@ export function createServer(
           const kinds = new Set((await agentManifests()).manifests.map((manifest) => manifest.agent));
           kinds.add("omp");
           kinds.add("claude");
-          // not a herdr kind: offered where this server can run it (see startOmo)
-          if (Bun.which("omo")) kinds.add("omo");
+          // not herdr kinds: offered where this server can run them (see shell-agent.ts)
+          for (const kind of Object.keys(SHELL_AGENTS)) if (shellAgentExecutable(kind)) kinds.add(kind);
           const agents: AgentKind[] = [...kinds]
             .map((kind) => ({ kind, label: AGENT_LABELS[kind] ?? kind }))
             .sort((left, right) => left.label.localeCompare(right.label) || left.kind.localeCompare(right.kind));
@@ -875,10 +952,11 @@ export function createServer(
             return jsonResponse({ workspace_id: created.workspace.workspace_id, pane_id: created.root_pane.pane_id, agent_started: false });
           }
           try {
-            if (payload.agent.kind === "omo") await startOmo(created.root_pane.pane_id, payload.agent.args as string[] | undefined);
+            const kind = payload.agent.kind as string;
+            if (isShellAgentKind(kind)) await startShellAgent(kind, created.root_pane.pane_id, payload.agent.args as string[] | undefined);
             else await agentStart({
               name: typeof payload.agent.name === "string" && payload.agent.name.length > 0 ? payload.agent.name : payload.agent.kind as string,
-              kind: payload.agent.kind as string,
+              kind,
               paneId: created.root_pane.pane_id,
               ...(payload.agent.args === undefined ? {} : { args: payload.agent.args as string[] }),
               timeoutMs: 60_000,
@@ -1239,17 +1317,29 @@ export function createServer(
                 releaseUnclaimed(message.pane_id, attachment);
                 break;
               }
+              // a mirror whose pane went away during its first read has already ended: joining
+              // it would leave this client on a terminal that never says anything again
+              if (attachment.mirror && attachments.get(message.pane_id) !== attachment) {
+                client.data.attached.delete(message.pane_id);
+                send(client, { type: "pty-exit", pane_id: message.pane_id, code: null });
+                break;
+              }
               // An idempotent attach must not replay terminal bytes a second time.
               const alreadyAttached = attachment.clients.has(client);
               attachment.clients.add(client);
               if (!alreadyAttached && message.flow_control === "ack") client.data.output.set(message.pane_id, new OutputWindow());
+              // a mirrored screen is drawn for the pane's own grid: the client takes that size
+              // before the screen, or the rows would wrap in a grid of another width
+              if (attachment.mirror) send(client, { type: "pane-geometry", pane_id: message.pane_id, cols: attachment.cols, rows: attachment.rows, fixed: true });
               // hand the newcomer the current screen it would otherwise have missed
-              const replay = attachment.replay.text();
+              // (a mirror keeps its latest screen whole; a pty keeps a bounded tail of its stream)
+              const replay = attachment.mirror ? attachment.mirror.current ?? "" : attachment.replay.text();
               if (!alreadyAttached && replay) sendOutput(client, message.pane_id, replay);
               // a pane waiting for another web bridge to let go says so to each newcomer, too
               if (!alreadyAttached && attachment.held) send(client, { type: "error", code: "attach_held", message: ATTACH_HELD_MESSAGE, pane_id: message.pane_id });
               reconcileOutput(message.pane_id);
               if (client.data.closing) break;
+              if (attachment.mirror) break;
               if (client.data.mode === "interact") {
                 // an operator's viewport owns the shared grid
                 resizePty(message.pane_id, geometry.cols, geometry.rows);
@@ -1289,6 +1379,22 @@ export function createServer(
               // the pty holds a lone ESC ~150ms and a Stop would overtake nothing
               // typing reaches an attached pane only, queued or not
               const attachment = attachments.get(message.pane_id);
+              // without a pty (Windows: no terminal, or a mirrored one) typing, the key bar's Enter,
+              // Stop and arrows go through herdr itself, each in its turn behind a message in flight.
+              // The turn is taken before herdr is asked what it can do: a message sent while
+              // that answer is on its way must not overtake the typing.
+              if (terminalAttachKnown === false || (!attachment && terminalAttachKnown === null)) {
+                const text = message.text;
+                void serialize(message.pane_id, async () => {
+                  // a herdr that attaches: typing reaches an attached pane only
+                  if (await terminalAttach()) return;
+                  // nothing typed outlives its connection
+                  if (!clients.has(client)) return;
+                  authorizeSocket(client);
+                  return paneSendText(message.pane_id, text);
+                }).catch(() => undefined);
+                break;
+              }
               // another web bridge has this pane's terminal: nothing typed here reaches it
               if (!attachment || attachment.held) break;
               if (paneQueues.has(message.pane_id)) {
@@ -1296,6 +1402,8 @@ export function createServer(
                 void serialize(message.pane_id, () => {
                   // held while this waited its turn: it goes nowhere, as unqueued typing would
                   if (attachments.get(message.pane_id)?.held) return;
+                  // nothing typed outlives its connection
+                  if (!clients.has(client)) return;
                   authorizeSocket(client);
                   return paneSendText(message.pane_id, text);
                 }).catch(() => undefined);
@@ -1336,6 +1444,8 @@ export function createServer(
                   send(client, { type: "error", code: "attach_held", message: ATTACH_HELD_MESSAGE, pane_id: message.pane_id });
                   return;
                 }
+                // a key pressed by a connection that has gone since is not pressed
+                if (!clients.has(client)) return;
                 authorizeSocket(client);
                 return paneSendKeys(message.pane_id, message.keys);
               });
@@ -1361,8 +1471,16 @@ export function createServer(
                   authorizeSocket(client);
                   if (!attachment.clients.has(client) || attachments.get(message.pane_id) !== attachment) { result(false, "not_attached"); return; }
                   if (secretPrompt(screen.text, attachment.cols) !== message.prompt) { result(false, "prompt_changed"); return; }
-                  // Direct attach keystrokes: no agent transcript, RPC payload or delayed Enter.
-                  attachment.pty.write(`${message.secret}\r`);
+                  if (attachment.mirror) {
+                    // A mirrored pane has no pty to type into: the secret is herdr's text, then the
+                    // Enter key (a `\r` inside the text is not Enter to every shell). Both are awaited,
+                    // so a send herdr refused is answered as failed, not as entered.
+                    await paneSendText(message.pane_id, message.secret);
+                    await paneSendKeys(message.pane_id, ["Enter"]);
+                  } else {
+                    // Direct attach keystrokes: no agent transcript, RPC payload or delayed Enter.
+                    attachment.pty.write(`${message.secret}\r`);
+                  }
                   result(true);
                 });
               } catch {

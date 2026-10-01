@@ -127,6 +127,8 @@ export function PaneTerminal({
   const [outputReady, setOutputReady] = useState(false);
   const [ended, setEnded] = useState(false);
   const [outputError, setOutputError] = useState<string | null>(null);
+  // the server answered terminal_unsupported (a bridge too old to mirror): the lens is a notice, the chat still works
+  const [unsupported, setUnsupported] = useState(false);
   // another web bridge has this pane's terminal: the server waits for it and says attach-resumed
   const [held, setHeldState] = useState(false);
   // what the socket handlers read mid-stream: stdin, onData and the composer's submit
@@ -137,6 +139,8 @@ export function PaneTerminal({
   const [ctrlArmed, setCtrlArmed] = useState(false);
   // observe mode: the ref is what onData and the resize listeners read mid-stream
   const observeRef = useRef(false);
+  // a mirrored pane (no terminal attach on its PC): the grid is the pane's own in herdr, adopted like an observer's
+  const fixedGridRef = useRef(false);
   const [observing, setObserving] = useState(false);
   const [secret, setSecret] = useState<{ pane: string; prompt: string } | null>(null);
   const secretRef = useRef<string | null>(null);
@@ -290,11 +294,30 @@ export function PaneTerminal({
         dragWheel(event);
         return false;
       }
+      // an adopted grid sends herdr nothing: the wheel is the browser's, and pans the mount
+      if (adopted()) return false;
       if (term.hasSelection()) term.clearSelection();
       return term.modes.mouseTrackingMode !== "none";
     });
     termRef.current = term;
     fitRef.current = fit;
+
+    // A grid that is not this browser's own (observing, or mirrored from a PC that cannot
+    // attach) may be larger than the mount. The mount then scrolls (PaneTerminal.css) and a
+    // drag pans it. Until the user pans, the view keeps the cursor's row in sight: the top of
+    // the grid while the row fits there, else the bottom rows, where a prompt sits. A mirror
+    // has no cursor; xterm's own rests on the last row with text, which serves the same.
+    const adopted = (): boolean => observeRef.current || fixedGridRef.current;
+    let panned = false;
+    const followCursor = (): void => {
+      host.toggleAttribute("data-adopted-grid", adopted());
+      const screen = term.element?.querySelector<HTMLElement>(".xterm-screen");
+      if (!adopted() || panned || !screen) return;
+      const row = screen.offsetHeight / term.rows;
+      const cursorBottom = screen.offsetTop + (term.buffer.active.cursorY + 1) * row;
+      const max = host.scrollHeight - host.clientHeight;
+      host.scrollTop = cursorBottom <= host.clientHeight ? 0 : cursorBottom - row >= max ? max : cursorBottom - host.clientHeight;
+    };
 
     /** herdr's text for the last drag, while its highlight is still the selection */
     let copiedText: string | null = null;
@@ -570,6 +593,7 @@ export function PaneTerminal({
           acknowledge?.();
           if (paneRef.current !== owner || generation !== outputGeneration) return;
           setOutputReady(true);
+          followCursor();
           const lines: string[] = [];
           const buffer = term.buffer.active;
           for (let row = 0; row < buffer.length; row++) {
@@ -598,7 +622,7 @@ export function PaneTerminal({
         setObserving(nowObserving);
         term.options.disableStdin = nowObserving || secretRef.current !== null || heldRef.current;
         onRoleAckRef.current?.(message.mode);
-        if (!nowObserving) {
+        if (!nowObserving && !fixedGridRef.current) {
           try {
             fit.fit();
           } catch {
@@ -607,16 +631,30 @@ export function PaneTerminal({
           const pane = paneRef.current;
           if (pane) socket.resize(pane, term.cols, term.rows, true);
         }
+        panned = false;
+        followCursor();
       } else if (message.type === "pane-geometry") {
-        // observe clients adopt the pty's grid; interact clients drive it and ignore this
-        if (!observeRef.current || message.pane_id !== paneRef.current) return;
+        // observe clients adopt the pty's grid; interact clients drive it and ignore this,
+        // unless the grid is fixed: then nobody here drives it
+        if (message.pane_id !== paneRef.current) return;
+        if (message.fixed) fixedGridRef.current = true;
+        if (!observeRef.current && !fixedGridRef.current) return;
         if (term.cols !== message.cols || term.rows !== message.rows) term.resize(message.cols, message.rows);
+        panned = false;
+        followCursor();
       } else if (message.type === "error") {
         if (message.code === "attach_held") {
           // a pane this terminal already left: its wait is not this pane's
           if (message.pane_id !== undefined && message.pane_id !== paneRef.current) return;
           // not an end: the server attaches as soon as the other bridge lets go
           setHeld(true);
+          term.options.disableStdin = true;
+          setConnected(socket.connected);
+          return;
+        }
+        if (message.code === "terminal_unsupported") {
+          if (message.pane_id !== undefined && message.pane_id !== paneRef.current) return;
+          setUnsupported(true);
           term.options.disableStdin = true;
           setConnected(socket.connected);
           return;
@@ -675,7 +713,13 @@ export function PaneTerminal({
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(() => {
         resizeTimer = null;
-        if (observeRef.current) return; // the grid belongs to the pty while observing
+        // the grid belongs to the pty while observing, and to herdr when fixed: only the view moves
+        // (a soft keyboard opening must not leave the prompt under it)
+        if (adopted()) {
+          panned = false;
+          followCursor();
+          return;
+        }
         try {
           fit.fit();
         } catch {
@@ -694,12 +738,18 @@ export function PaneTerminal({
     // The text follows the finger, as everywhere on a phone: dragging down brings
     // older lines in. Each event carries the finger's position, since xterm reports
     // a wheel at the cell under it (without one, every report said row 1, column 1).
+    // An adopted grid has no history to send a wheel to (an observer's reports are dropped, a
+    // mirror reports nothing): there the drag pans the mount, both ways, to the cells past its edge.
+    let touchX = 0;
     let touchY = 0;
     let tracking = false;
     const onTouchStart = (event: TouchEvent): void => {
       tracking = event.touches.length === 1;
       const first = event.touches[0];
-      if (tracking && first) touchY = first.clientY;
+      if (tracking && first) {
+        touchX = first.clientX;
+        touchY = first.clientY;
+      }
     };
     const onTouchMove = (event: TouchEvent): void => {
       if (!tracking || event.touches.length !== 1) return;
@@ -708,7 +758,14 @@ export function PaneTerminal({
       if (!first) return;
       // finger moving down (y > touchY) shows older lines: a wheel scrolling up, negative deltaY
       const delta = touchY - first.clientY;
+      const across = touchX - first.clientX;
+      touchX = first.clientX;
       touchY = first.clientY;
+      if (adopted()) {
+        panned = true;
+        host.scrollBy(across, delta);
+        return;
+      }
       if (delta !== 0) {
         const target = term.element ?? host;
         target.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: delta, clientX: first.clientX, clientY: first.clientY }));
@@ -728,7 +785,7 @@ export function PaneTerminal({
     // connections never do this: they own no geometry to re-assert.
     const refit = (): void => {
       const current = paneRef.current;
-      if (!current || observeRef.current) return;
+      if (!current || observeRef.current || fixedGridRef.current) return;
       try {
         fit.fit();
       } catch {
@@ -779,7 +836,7 @@ export function PaneTerminal({
     term.options.theme = terminalTheme(theme, palette);
     if (term.options.fontSize !== terminalFontSize) {
       term.options.fontSize = terminalFontSize;
-      if (observeRef.current) return;
+      if (observeRef.current || fixedGridRef.current) return;
       try {
         fitRef.current?.fit();
       } catch {
@@ -793,7 +850,7 @@ export function PaneTerminal({
   // the grid must re-fit when the lens switches back: the chat lens covered it, and a
   // resize while covered may have been skipped by a zero-size layout
   useEffect(() => {
-    if (chatView || observeRef.current) return;
+    if (chatView || observeRef.current || fixedGridRef.current) return;
     const term = termRef.current;
     try {
       fitRef.current?.fit();
@@ -815,6 +872,10 @@ export function PaneTerminal({
     setOutputReady(false);
     setOutputError(null);
     setHeld(false);
+    setUnsupported(false);
+    fixedGridRef.current = false;
+    // the next pane's grid is this browser's again unless it says otherwise (pane-geometry)
+    hostRef.current?.toggleAttribute("data-adopted-grid", observeRef.current);
     secretRef.current = null;
     setSecret(null);
     term.options.disableStdin = observeRef.current;
@@ -1042,6 +1103,11 @@ export function PaneTerminal({
         {paneId !== null && held && (
           <div className="terminal-banner terminal-banner-warning" role="status">
             <span>{t("Another app has this pane open. It connects here as soon as that app lets go.")}</span>
+          </div>
+        )}
+        {paneId !== null && !chatView && unsupported && (
+          <div className="terminal-banner terminal-banner-soon" role="status">
+            <span>{t("Live terminal is coming to Windows PCs: herdr cannot attach a terminal there yet. The chat lens works now.")}</span>
           </div>
         )}
         {paneId !== null && outputError && (

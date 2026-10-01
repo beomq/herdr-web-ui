@@ -131,7 +131,6 @@ CSS tokens verbatim for each resolved theme and palette (`settings.test.ts` chec
 ### Settings
 - `theme`: `dark`, `light`, or `system`; default `dark`.
 - `palette`: `amber`, `report` or `charcoal`; default `amber`.
-- `claudeMark` (`logo` or `mascot`) and `codexMark` (`logo` or `app`): the provider logo by default.
 - `density`: `comfortable` or `compact`; default `comfortable`.
 - Terminal font size is independent: default `13px`, clamped to `10–22px`.
 - Composer Enter behavior and folded thinking visibility are preferences, not typography tokens.
@@ -320,8 +319,12 @@ Comfortable values are `:root`; the final column is the complete compact overrid
   fold. A row expands to the typed input (command, diff, file, checklist, raw) and an Output pane.
 
 ### Prompt card (`.prompt-card`)
-- Appears in chat while the agent is blocked and the visible pane contains a supported Claude, omp
-  or codex question, approval or plan menu.
+- Appears in chat while the agent is blocked and the visible pane contains a supported Claude, omp,
+  omo or codex question, approval or plan menu.
+- A form of several questions (omo) shows a row of step chips (`.prompt-card-steps`) under the
+  header: a chip per question, pill-shaped, mono number or a check once answered (`--accent`), the
+  one asked now with an `--accent` border, `--accent-tint` fill and a `--primary` number. The title
+  then reads `Question 1 of 2`; the review after the last question keeps the chips, all checked.
 - Single options submit immediately; multi-select exposes checks plus Submit; supported custom input
   has its own labelled field. The prompt content hash rejects a stale answer with `prompt_changed`.
 - Options are full-width rows (`.prompt-card-option`): the menu's number in mono, the label, its
@@ -344,9 +347,8 @@ Comfortable values are `:root`; the final column is the complete compact overrid
   `@` completions query `GET /api/pane/files`. Arrow keys navigate, Enter/Tab accepts, Escape closes.
 - Paste, picker or drag/drop accepts up to four png/jpeg/gif/webp files per action. Each gets a local
   preview, uploads through `POST /api/pane/image`, and inserts a removable editable `@path` mention.
-- While a phone's keyboard is up, **Hide keyboard** sits just before the report action, which
-  keeps its place at the end of the status line; a tap on the transcript or a drag down it (`32px`)
-  also puts the keyboard away. Each only blurs the field, so the draft stays.
+- While a phone's keyboard is up, a tap on the transcript or a drag down it (`32px`) puts the
+  keyboard away. Each only blurs the field, so the draft stays.
 - Enter sends and Shift+Enter breaks by default; with **Enter sends** off, Mod+Enter sends. IME Enter
   is ignored. While working, Stop sends Escape and Queue stores the next message.
 

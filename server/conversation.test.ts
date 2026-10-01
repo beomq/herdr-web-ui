@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 
 import { forgetHistoryChains } from "./codex.ts";
-import { ConversationUnavailable, gjcTranscriptPath, HistoryChanged, isOmoProcess, parseClaudeTranscript, unwrapPastes, transcriptImage, transcriptPage, transcriptToolOutput } from "./conversation.ts";
+import { ConversationUnavailable, gjcTranscriptPath, HistoryChanged, isOmoProcess, ompSessionPath, parseClaudeTranscript, unwrapPastes, transcriptImage, transcriptPage, transcriptToolOutput } from "./conversation.ts";
 import { MAX_TURNS, parseOmpTranscript } from "./transcript-records.ts";
 
 /** Minimal but shape-true slices of a Claude Code session jsonl. */
@@ -203,6 +203,34 @@ describe("omo transcript resolution", () => {
     expect(isOmoProcess(["/home/u/.local/bin/claude"])).toBeFalse();
     expect(isOmoProcess(["omp"])).toBeFalse();
     expect(isOmoProcess(["node", "/home/u/omo-tools/watch.js"])).toBeFalse();
+    // a shell rc file printing a PATH that has omo-ai's bin directory in it
+    expect(isOmoProcess(["printf", "%s\\n", "/home/u/.local/bin:/home/u/lib/node_modules/omo-ai/node_modules/.bin:/usr/bin"])).toBeFalse();
+    expect(isOmoProcess(["printf", "%s\\n", "/usr/bin:/home/u/.nvm/versions/node/v24.18.0/bin/omo"])).toBeFalse();
+  });
+});
+
+describe("omp session path", () => {
+  it("accepts the path herdr reports only inside the user's own store", () => {
+    const home = "/home/u", store = "/home/u/.omp/agent/sessions";
+    expect(ompSessionPath(`${store}/project/session.jsonl`, home)).toBe(`${store}/project/session.jsonl`);
+    expect(ompSessionPath(`${store}-evil/project/session.jsonl`, home)).toBeNull();
+    expect(ompSessionPath(`${store}/../../../../etc/session.jsonl`, home)).toBeNull();
+    expect(ompSessionPath(`${store}/project/notes.txt`, home)).toBeNull();
+    expect(ompSessionPath(".omp/agent/sessions/project/session.jsonl", home)).toBeNull();
+    expect(ompSessionPath(undefined, home)).toBeNull();
+  });
+
+  it("accepts a Windows PC's native path, and refuses the same ways out", () => {
+    const home = "C:\\Users\\u", store = "C:\\Users\\u\\.omp\\agent\\sessions";
+    const session = `${store}\\project\\session.jsonl`;
+    expect(ompSessionPath(session, home, win32)).toBe(session);
+    expect(ompSessionPath(session.replaceAll("\\", "/"), home, win32)).toBe(session.replaceAll("\\", "/"));
+    expect(ompSessionPath(`${store}-evil\\project\\session.jsonl`, home, win32)).toBeNull();
+    expect(ompSessionPath(`${store}\\..\\sessions-evil\\session.jsonl`, home, win32)).toBeNull();
+    expect(ompSessionPath(`${store}\\project\\..\\..\\..\\..\\session.jsonl`, home, win32)).toBeNull();
+    expect(ompSessionPath(`D:${session.slice(2)}`, home, win32)).toBeNull();
+    expect(ompSessionPath(`\\\\server\\share\\.omp\\agent\\sessions\\session.jsonl`, home, win32)).toBeNull();
+    expect(ompSessionPath(`${store}\\project\\notes.txt`, home, win32)).toBeNull();
   });
 });
 
@@ -231,6 +259,25 @@ describe("gjc sessions", () => {
       JSON.stringify({ type: "message", timestamp: "2026-09-25T00:00:01.000Z", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "401 Authentication Failed" } }),
     ].join("\n");
     expect(parseOmpTranscript(text).at(-1)?.parts).toEqual([{ kind: "text", text: "Error: 401 Authentication Failed" }]);
+  });
+
+  it("ends a turn at a background result gjc delivers, so the answer before it stays the answer", () => {
+    const assistant = (ts: string, text: string) => JSON.stringify({ type: "message", timestamp: ts, message: { role: "assistant", content: [{ type: "text", text }] } });
+    const text = [
+      JSON.stringify({ type: "message", timestamp: "2026-10-01T00:00:00.000Z", message: { role: "user", content: [{ type: "text", text: "run it in the background" }] } }),
+      assistant("2026-10-01T00:00:01.000Z", "Started; here is the summary."),
+      JSON.stringify({ type: "custom_message", customType: "async-result", display: true, timestamp: "2026-10-01T00:05:00.000Z", content: "<system-notice>\nBackground job bg_1 has completed.\nPASS all\n</system-notice>" }),
+      assistant("2026-10-01T00:05:02.000Z", "CI is green."),
+      JSON.stringify({ type: "custom_message", customType: "async-result", display: false, timestamp: "2026-10-01T00:06:00.000Z", content: "<system-notice>hidden</system-notice>" }),
+      JSON.stringify({ type: "custom", customType: "workflow-intent-diff", data: { route: "direct" } }),
+      assistant("2026-10-01T00:06:01.000Z", "Still green."),
+    ].join("\n");
+    expect(parseOmpTranscript(text)).toEqual([
+      { role: "user", ts: "2026-10-01T00:00:00.000Z", parts: [{ kind: "text", text: "run it in the background" }] },
+      { role: "assistant", ts: "2026-10-01T00:00:01.000Z", end_ts: "2026-10-01T00:00:01.000Z", parts: [{ kind: "text", text: "Started; here is the summary." }] },
+      { role: "user", ts: "2026-10-01T00:05:00.000Z", parts: [{ kind: "notice", text: "Background job bg_1 has completed.\nPASS all" }] },
+      { role: "assistant", ts: "2026-10-01T00:05:02.000Z", end_ts: "2026-10-01T00:06:01.000Z", parts: [{ kind: "text", text: "CI is green." }, { kind: "text", text: "Still green." }] },
+    ]);
   });
 });
 

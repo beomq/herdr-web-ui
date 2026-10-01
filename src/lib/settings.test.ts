@@ -55,6 +55,15 @@ describe("quick replies", () => {
   });
 });
 
+describe("suggestion chip", () => {
+  it("stays off until chosen in settings", () => {
+    expect(DEFAULT_SETTINGS.showSuggestionChip).toBe(false);
+    expect(sanitizeSettings({}).showSuggestionChip).toBe(false);
+    expect(sanitizeSettings({ showSuggestionChip: true }).showSuggestionChip).toBe(true);
+    expect(sanitizeSettings({ showSuggestionChip: "yes" }).showSuggestionChip).toBe(false);
+  });
+});
+
 describe("quick replies row", () => {
   it("stays hidden until chosen in settings", () => {
     expect(DEFAULT_SETTINGS.showQuickReplies).toBe(false);
@@ -156,11 +165,10 @@ describe("palette", () => {
 });
 
 describe("agent marks", () => {
-  it("shows provider logos until an app icon is chosen", () => {
-    expect(sanitizeSettings({}).claudeMark).toBe("logo");
-    expect(sanitizeSettings({}).codexMark).toBe("logo");
-    expect(sanitizeSettings({ claudeMark: "mascot", codexMark: "app" })).toMatchObject({ claudeMark: "mascot", codexMark: "app" });
-    expect(sanitizeSettings({ claudeMark: "alien", codexMark: 1 })).toMatchObject({ claudeMark: "logo", codexMark: "logo" });
+  it("drops the icon choice 0.3.36 stored, so every pane shows its provider logo", () => {
+    const settings = sanitizeSettings({ claudeMark: "mascot", codexMark: "app" });
+    expect(settings).not.toHaveProperty("claudeMark");
+    expect(settings).not.toHaveProperty("codexMark");
   });
 });
 
