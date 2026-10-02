@@ -16,6 +16,8 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
   ([#292](https://github.com/devswha/herdr-web-ui/pull/292))
 
 ### Fixed
+- The terminal accepts dropped file paths and uploads dropped or pasted files to
+  the pane's working directory before inserting their quoted paths, without submitting them.
 - An agent's finish is no longer lost when a pane opens or closes somewhere at the same moment.
   The server reopens its status subscription whenever the set of panes changes, and a status
   that changed in between was never sent again: no done alert came, and a browser kept the old
