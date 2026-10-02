@@ -499,5 +499,8 @@ try {
     }
   }
   try { rmSync(root, { recursive: true, force: true }); } catch (error) { cleanupErrors.push(error); }
-  if (cleanupErrors.length) throw new AggregateError(cleanupErrors, "Directory regression cleanup failed");
+  if (cleanupErrors.length) {
+    console.error(new AggregateError(cleanupErrors, "Directory regression cleanup failed"));
+    process.exitCode = 1;
+  }
 }
