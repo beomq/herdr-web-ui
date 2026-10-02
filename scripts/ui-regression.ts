@@ -57,7 +57,8 @@ try {
   });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   await context.addInitScript((ids) => {
-    localStorage.setItem("herdr-web-ui:settings", JSON.stringify({ language: "en" }));
+    // only the first load: a reload must keep what Settings stored, such as the sidebar grouping
+    if (!localStorage.getItem("herdr-web-ui:settings")) localStorage.setItem("herdr-web-ui:settings", JSON.stringify({ language: "en" }));
     for (const id of ids) localStorage.setItem(`herdr-web-ui:view:${id}`, "chat");
   }, panes);
   const page = await context.newPage();
