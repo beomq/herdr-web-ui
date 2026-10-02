@@ -32,6 +32,7 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
 ### Fixed
 - The terminal accepts dropped file paths and uploads dropped or pasted files to
   the pane's working directory before inserting their quoted paths, without submitting them.
+  ([#304](https://github.com/devswha/herdr-web-ui/pull/304) by @beomq)
 - In an OmO, omp or pi chat, a message that invoked a skill (`/skill:name`, `$name`, or a keyword such as
   `ulw`) shows what you asked, not the whole SKILL.md the agent put before it: one such message
   filled tens of KB of the chat. The skill shows as a chip under your message, standalone `.md`

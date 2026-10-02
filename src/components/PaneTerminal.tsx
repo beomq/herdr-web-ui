@@ -652,7 +652,8 @@ export function PaneTerminal({
           term.options.disableStdin = observeRef.current || secretRef.current !== null;
         }
       } else if (message.type === "pty-exit") {
-        if (message.pane_id === paneRef.current) setEnded(true);
+        // an ended pane takes no input: a file dropped on it must not upload and paste either
+        if (message.pane_id === paneRef.current) { setEnded(true); term.options.disableStdin = true; }
       } else if (message.type === "role-ack") {
         // the server is the authority on the role; only after this ack may an
         // interact client reclaim the shared grid it stopped owning
@@ -745,9 +746,15 @@ export function PaneTerminal({
 
     // Browsers expose dropped files as bytes, not local paths. Save them beside
     // the pane and paste the returned paths; never send Enter with a drop.
-    const uploadFiles = async (files: File[]): Promise<void> => {
+    // Batches upload one after another, so overlapping drops paste their paths in the order dropped.
+    let fileQueue: Promise<void> = Promise.resolve();
+    const uploadFiles = (files: File[]): void => {
       const pane = paneRef.current;
       if (!pane || !socket.connected || term.options.disableStdin) return;
+      fileQueue = fileQueue.then(() => uploadBatch(pane, files));
+    };
+    const uploadBatch = async (pane: string, files: File[]): Promise<void> => {
+      if (paneRef.current !== pane || !socket.connected || term.options.disableStdin) return;
       try {
         const paths: string[] = [];
         for (const file of files) paths.push(await uploadFileRef.current(pane, file));
@@ -767,7 +774,7 @@ export function PaneTerminal({
       if (files.length === 0) return;
       event.preventDefault();
       event.stopPropagation();
-      void uploadFiles(files);
+      uploadFiles(files);
     };
     const onDragOver = (event: DragEvent): void => {
       if (!event.dataTransfer) return;
@@ -780,7 +787,7 @@ export function PaneTerminal({
       if (!event.dataTransfer || !socket.connected || term.options.disableStdin) return;
       const files = Array.from(event.dataTransfer.files);
       if (files.length > 0) {
-        void uploadFiles(files);
+        uploadFiles(files);
         return;
       }
       const text = event.dataTransfer.getData("text/plain");
