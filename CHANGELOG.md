@@ -13,11 +13,13 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
   the selected mode and each mode's collapsed groups are remembered independently.
 - While an OmO pane has background tasks running, the chat's status line says how many, and tapping
   it lists them: what each is doing, its category and model, how long it has run, its turns, tool
-  calls and tokens, and below, the tasks that ended in the last day and whether they finished,
-  failed, were cancelled or were lost with OmO's process. A remote PC lists them once it runs a
-  bridge that knows this list. ([#305](https://github.com/devswha/herdr-web-ui/pull/305))
+  calls and tokens. The newest tasks that ended in the last day (up to ten) are one line under
+  them that says how many ended and how many failed, and opens to show whether each finished,
+  failed, was cancelled or was lost with OmO's process. A remote PC lists them once it runs a bridge that knows this list.
+  ([#305](https://github.com/devswha/herdr-web-ui/pull/305), [#310](https://github.com/devswha/herdr-web-ui/pull/310))
 - The same list shows the workflows (DAG runs) the OmO session started: each one's name, how many
   steps are done, running or failed, and its steps wave by wave, with why a failed step failed.
+  A workflow that ended folds into the same line as the tasks that ended.
   ([#306](https://github.com/devswha/herdr-web-ui/pull/306))
 - An OmO turn that set or updated a goal shows it on the turn, beside the skills, also while its work
   is folded: the objective, whether it is in progress, complete, blocked, paused or out of budget, and
@@ -25,6 +27,12 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
   ([#303](https://github.com/devswha/herdr-web-ui/pull/303))
 
 ### Changed
+- With an access token set (`HERDR_WEB_TOKEN`), your own Tailscale devices are asked for it too:
+  once per device, and that browser then stays signed in for a year. A paired device still gets in
+  without it, and nothing changes when no token is set. Before, the token was skipped for a request
+  that named this PC's Tailscale login, and any other proxy on the same PC (nginx, Caddy, a tunnel)
+  passes a visitor's copy of that name on unless it is told to drop it, so the token did not keep
+  such a visitor out. ([#309](https://github.com/devswha/herdr-web-ui/pull/309))
 - A mirrored terminal (a Windows PC, or one with no Node for the terminal attach) sends the rows
   that changed instead of the whole screen each time, and shows what you type sooner. An agent at
   work repaints a spinner about 12 times a second: measured with gjc, that was 88 KB a second to
@@ -33,6 +41,18 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
   ([#292](https://github.com/devswha/herdr-web-ui/pull/292))
 
 ### Fixed
+- On a phone the status line above the message box is always one row. With a background-task
+  count, a model name and a reasoning level it wrapped to two rows, three with the context text
+  open, and took that room from the conversation. On a narrow screen the background-task chip now
+  shows its icon and the number (the icon alone while nothing runs), the reasoning chip the level
+  alone, and a model name that still does not fit is shortened. ([#312](https://github.com/devswha/herdr-web-ui/pull/312))
+- The terminal accepts dropped file paths and uploads dropped or pasted files to
+  the pane's working directory before inserting their quoted paths, without submitting them.
+  ([#304](https://github.com/devswha/herdr-web-ui/pull/304) by @beomq)
+- A message sent to Claude Code while it is working shows in the chat. Claude records such a
+  message differently from one sent while it waits, and the chat skipped it, so the agent acted
+  on words the chat never showed.
+  ([#301](https://github.com/devswha/herdr-web-ui/pull/301))
 - In an OmO, omp or pi chat, a message that invoked a skill (`/skill:name`, `$name`, or a keyword such as
   `ulw`) shows what you asked, not the whole SKILL.md the agent put before it: one such message
   filled tens of KB of the chat. The skill shows as a chip under your message, standalone `.md`
