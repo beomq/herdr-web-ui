@@ -7,6 +7,11 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
 
 ## [Unreleased]
 
+### Added
+- Settings → Appearance lets you group sidebar sessions by folder, combining panes with the
+  same full working-directory path within each PC. Grouping by workspace remains the default;
+  the selected mode and each mode's collapsed groups are remembered independently.
+
 ### Changed
 - A mirrored terminal (a Windows PC, or one with no Node for the terminal attach) sends the rows
   that changed instead of the whole screen each time, and shows what you type sooner. An agent at
