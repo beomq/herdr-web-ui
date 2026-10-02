@@ -177,6 +177,11 @@ export function Sidebar({ snapshot, selectedPaneId, actions, version, embedded =
     return workspaceOrder.map((id) => byId.get(id)).filter((workspace): workspace is WorkspaceInfo => workspace !== undefined);
   }, [snapshot, workspaceOrder]);
   const directories = useMemo(() => groupDirectories(orderedWorkspaces, snapshot?.panes ?? []), [orderedWorkspaces, snapshot?.panes]);
+  const workspacePaneCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const pane of snapshot?.panes ?? []) counts.set(pane.workspace_id, (counts.get(pane.workspace_id) ?? 0) + 1);
+    return counts;
+  }, [snapshot?.panes]);
 
   const noteError = (message: string, paneId?: string): void => setInlineError({ message, paneId });
 
@@ -212,8 +217,10 @@ export function Sidebar({ snapshot, selectedPaneId, actions, version, embedded =
     });
   };
 
-  const beginWorkspaceRename = (workspace: WorkspaceInfo): void => {
-    setEditingWorkspaceId(workspace.workspace_id);
+  // By folder, one workspace can show under several folders: only the copy that was clicked edits.
+  // Two mounted inputs would take the focus from each other, and the blur closes both.
+  const beginWorkspaceRename = (workspace: WorkspaceInfo, scope: string): void => {
+    setEditingWorkspaceId(`${scope}\u0000${workspace.workspace_id}`);
     setWorkspaceLabel(workspace.label);
   };
 
@@ -279,11 +286,13 @@ export function Sidebar({ snapshot, selectedPaneId, actions, version, embedded =
     </button>
   );
 
-  const renderWorkspace = (workspace: WorkspaceInfo, visiblePanes: PaneInfo[]) => {
+  const renderWorkspace = (workspace: WorkspaceInfo, visiblePanes: PaneInfo[], scope = "") => {
     if (visiblePanes.length === 0) return null;
     // A single pane already names its workspace in the subtitle. Keep the
-    // separate workspace heading only when it groups several panes.
-    const merged = visiblePanes.length === 1;
+    // separate workspace heading only when it groups several panes. Count the
+    // whole workspace: a folder can show one pane of a workspace that has more,
+    // and that heading is the only place to rename the workspace.
+    const merged = (workspacePaneCounts.get(workspace.workspace_id) ?? visiblePanes.length) === 1;
     const groupKey = `workspace:${workspace.workspace_id}`;
     const collapsed = !byFolder && !merged && collapsedGroups.has(groupKey);
     return (
@@ -308,7 +317,7 @@ export function Sidebar({ snapshot, selectedPaneId, actions, version, embedded =
               {collapsed ? <ChevronRight aria-hidden="true" /> : <ChevronDown aria-hidden="true" />}
             </button>}
             <span className="workspace-number">{workspace.number}</span>
-            {editingWorkspaceId === workspace.workspace_id ? (
+            {editingWorkspaceId === `${scope}\u0000${workspace.workspace_id}` ? (
               <input
                 className="input workspace-rename-input"
                 aria-label={t("Workspace name")}
@@ -322,12 +331,12 @@ export function Sidebar({ snapshot, selectedPaneId, actions, version, embedded =
                 }}
               />
             ) : (
-              <span className="workspace-label" title={workspace.label} onDoubleClick={() => beginWorkspaceRename(workspace)}>
+              <span className="workspace-label" title={workspace.label} onDoubleClick={() => beginWorkspaceRename(workspace, scope)}>
                 {workspace.label}
               </span>
             )}
             <StatusBadge status={workspace.agent_status} />
-            <button type="button" className="sidebar-row-action workspace-rename" aria-label={t("Rename workspace {name}", { name: workspace.label })} onClick={() => beginWorkspaceRename(workspace)}>
+            <button type="button" className="sidebar-row-action workspace-rename" aria-label={t("Rename workspace {name}", { name: workspace.label })} onClick={() => beginWorkspaceRename(workspace, scope)}>
               <Pencil aria-hidden="true" />
             </button>
           </header>
@@ -436,7 +445,7 @@ export function Sidebar({ snapshot, selectedPaneId, actions, version, embedded =
               <span className="workspace-number">{directory.paneCount}</span>
             </button>
             {!collapsed && <div className="directory-contents">{directory.workspaces.map(({ workspace, panes: visiblePanes }) => {
-              return renderWorkspace(workspace, visiblePanes);
+              return renderWorkspace(workspace, visiblePanes, directory.key);
         })}</div>}
           </section>;
         }) : orderedWorkspaces.map((workspace) => renderWorkspace(workspace, snapshot?.panes.filter((pane) => pane.workspace_id === workspace.workspace_id) ?? []))}

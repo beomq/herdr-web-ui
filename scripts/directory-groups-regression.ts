@@ -99,7 +99,7 @@ try {
   assert.ok(alpha && beta && other && lone);
   assert.notEqual(alpha.workspaceId, beta.workspaceId, "same cwd must still own independent workspaces");
   const split = await herdrRpc<{ pane: { pane_id: string } }>("pane.split", {
-    target_pane_id: other.paneId, direction: "down", focus: false,
+    target_pane_id: other.paneId, direction: "down", focus: false, cwd: otherCwd,
   });
   const workspaceFoldKey = `herdr-web-ui:workspace-collapsed:local:${other.workspaceId}`;
   const directoryFoldKey = `herdr-web-ui:directory-collapsed:local:directory:${otherCwd}`;
@@ -396,6 +396,28 @@ try {
     await herdrRpc("pane.send_keys", { pane_id: beta.paneId, keys: ["Enter"] });
   }, "selected shell returns to the shared folder");
   console.log("PASS clicked selection, keyboard workspace reorder and selected cwd-change reveal");
+
+  // When one workspace's panes sit in two folders, each folder shows one of them. Then both
+  // copies keep the workspace heading (the only place to rename it), and its rename opens one
+  // editor that keeps the focus: two would take it from each other and close on the blur.
+  const otherHeader = (folder: string, paneId: string): string => `${folder} .workspace:has(${paneSelector(paneId)}) .workspace-header`;
+  let away = "";
+  await armState(page, [
+    { selector: otherHeader(distinct, other.paneId), count: 1 },
+    { selector: `${single} .workspace-header`, count: 1 },
+  ]);
+  away = (await herdrRpc<{ pane: { pane_id: string } }>("pane.split", {
+    target_pane_id: other.paneId, direction: "down", focus: false, cwd: loneCwd,
+  })).pane.pane_id;
+  await stateReceived(page, "a workspace split over two folders keeps its heading in both");
+  assert.equal(await page.locator(otherHeader(single, away)).count(), 1);
+  await changeState(page, [{ selector: ".workspace-rename-input:focus", count: 1 }, { selector: ".workspace-rename-input", count: 1 }],
+    () => page.locator(`${otherHeader(distinct, other.paneId)} .workspace-rename`).click(), "one workspace rename editor opens and keeps the focus");
+  await changeState(page, [{ selector: ".workspace-rename-input", count: 0 }],
+    () => page.locator(".workspace-rename-input").press("Escape"), "workspace rename editor closes on Escape");
+  await changeState(page, [{ selector: paneSelector(away), count: 0 }],
+    () => herdrRpc("pane.close", { pane_id: away }), "remove only the owned second-folder pane");
+  console.log("PASS a workspace shown under two folders keeps its heading and one rename editor");
 
   // Capture each requested viewport with the drawer actually open on mobile.
   for (const width of [1280, 768, 375]) {
