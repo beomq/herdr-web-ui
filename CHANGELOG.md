@@ -7,6 +7,10 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
 
 ## [Unreleased]
 
+### Changed
+- In the sidebar's By workspace view, a workspace with one pane keeps its numbered header and
+  can be folded, renamed and reordered from that header, just like a workspace with several panes.
+
 ## [0.3.43] - 2026-10-02
 
 ### Changed
