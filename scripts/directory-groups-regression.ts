@@ -184,6 +184,11 @@ try {
   assert.equal(await page.locator(otherWorkspace).count(), 1, "a workspace with two panes is one row");
   assert.equal(await page.locator(paneSelector(split.pane.pane_id)).count(), 0);
   assert.equal(await page.locator(".workspace-toggle").count(), 0, "a legacy workspace fold has nothing to fold");
+  const panesToggle = page.locator(otherWorkspace).locator(".workspace-panes-toggle");
+  await panesToggle.waitFor();
+  await changeState(page, [{ selector: paneSelector(split.pane.pane_id) }], () => panesToggle.click(), "workspace panes unfold in the sidebar");
+  assert.equal(await panesToggle.getAttribute("aria-expanded"), "true");
+  await changeState(page, [{ selector: paneSelector(split.pane.pane_id), count: 0 }], () => panesToggle.click(), "workspace panes fold again");
   assert.equal(await page.locator(".tab-strip").count(), 0, "no strip over a lone pane's workspace");
   for (const fixture of [alpha, beta]) {
     // A single pane is its workspace: one row with the reorder handle, no heading or toggle above
@@ -215,8 +220,8 @@ try {
   assert.deepEqual((await picker.getByRole("menuitem").allTextContents()).slice(2), ["Rename tab", "Close tab"]);
   assert.equal(await picker.getByRole("menuitem").count(), 4);
   assert.equal(await picker.locator('[role="menuitem"][aria-current="true"]').count(), 1, "the picker marks the open pane");
-  await changeState(page, [{ selector: `${paneSelector(split.pane.pane_id)}[aria-current="true"]` }, { selector: paneSelector(other.paneId), count: 0 }],
-    () => picker.getByRole("menuitem").nth(1).click(), "the picker opens the split pane, and the row follows it");
+  await changeState(page, [{ selector: `.pane-row ${paneSelector(split.pane.pane_id)}[aria-current="true"]` }, { selector: `.workspace-pane-choice ${paneSelector(split.pane.pane_id)}[aria-current="true"]` }],
+    () => picker.getByRole("menuitem").nth(1).click(), "the picker opens the split pane, and both the row and pane list follow it");
   for (const width of [1280, 768, 375]) {
     await page.setViewportSize({ width, height: 900 });
     if (await page.locator(".drawer-toggle").isVisible()
@@ -224,7 +229,7 @@ try {
       await changeState(page, [{ selector: "#workspace-drawer.is-open" }],
         () => page.locator(".drawer-toggle").click(), `workspace drawer opens at ${width}`);
     }
-    assert.equal(await page.locator(paneSelector(split.pane.pane_id)).isVisible(), true);
+    assert.equal(await page.locator(`.pane-row ${paneSelector(split.pane.pane_id)}`).isVisible(), true);
     assert.equal(await page.locator(".directory-group").count(), 0);
     await screenshot(`workspace-${width}`);
   }

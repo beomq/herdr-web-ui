@@ -204,10 +204,52 @@
   height: var(--icon-size);
 }
 
-.pane-list {
+.pane-list,
+.workspace-pane-list {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.workspace-pane-list {
+  margin: 0 var(--space-2) var(--space-2) var(--space-5);
+  border-left: var(--hairline) solid var(--border);
+}
+
+.workspace-pane-choice button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--touch-target);
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-pane-choice button > span:nth-child(2) {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-pane-choice.is-selected button {
+  color: var(--text-strong);
+  background: var(--bg-hover);
+}
+
+.workspace-panes-toggle {
+  width: auto;
+  min-width: var(--touch-target);
+  gap: var(--space-1);
+  padding: 0 var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
 }
 
 .pane-item {

@@ -319,7 +319,9 @@ One set for both themes: the card is island black wherever it shows.
   and the PC groups. A workspace starts from the `+` on its PC's header, or from the **New workspace**
   button in the dashed **No workspaces yet** box of an empty PC. **Add PC** lives in Settings →
   Remote PCs and in the command palette. Search lives in the command palette, not the roster.
-- One row per workspace, as herdr's Spaces sidebar: no workspace headers, numbers or folds. The
+- One row per workspace, as herdr's Spaces sidebar: no workspace headers or numbers. A workspace
+  with more than one pane has a count button that unfolds every pane in the sidebar; the choice is
+  remembered for the open page and unfolds automatically for the selected pane. The
   row stands for the workspace through its *current pane*: the selected pane when it is in the
   workspace, else the pane last viewed there, else the one herdr has in front. Its mark, title
   and folder are that pane's; its state word is the roll-up of every pane in the workspace

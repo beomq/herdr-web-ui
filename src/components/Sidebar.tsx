@@ -124,13 +124,17 @@ export function Sidebar({ snapshot, selectedPaneId, actions }: SidebarProps) {
   const [dragWorkspaceId, setDragWorkspaceId] = useState<string | null>(null);
   const [inlineError, setInlineError] = useState<InlineError | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => storedCollapsed(machineId, snapshot ? groupDirectories(snapshot.workspaces, snapshot.panes).map((group) => group.key) : []));
+  const [expandedWorkspaces, setExpandedWorkspaces] = useState<Set<string>>(new Set());
   const unfoldedFor = useRef<Partial<Record<SidebarGrouping, string>>>({});
   // the pane each workspace was last seen on: its row keeps showing and opening that one
   const lastViewed = useRef(new Map<string, string>());
 
   useEffect(() => {
     const pane = selectedPaneId ? snapshot?.panes.find((pane) => pane.pane_id === selectedPaneId) : undefined;
-    if (pane) lastViewed.current.set(pane.workspace_id, pane.pane_id);
+    if (!pane) return;
+    lastViewed.current.set(pane.workspace_id, pane.pane_id);
+    const count = snapshot?.panes.filter((candidate) => candidate.workspace_id === pane.workspace_id).length ?? 0;
+    if (count > 1) setExpandedWorkspaces((current) => current.has(pane.workspace_id) ? current : new Set([...current, pane.workspace_id]));
   }, [selectedPaneId, snapshot]);
 
   const setGroupCollapsed = (groupKey: string, collapsed: boolean): void => {
@@ -386,6 +390,30 @@ export function Sidebar({ snapshot, selectedPaneId, actions }: SidebarProps) {
     moveVisible(workspaceId, event.key === "ArrowUp" ? -1 : 1);
   };
 
+  const toggleWorkspacePanes = (workspaceId: string): void => {
+    setExpandedWorkspaces((current) => {
+      const next = new Set(current);
+      if (next.has(workspaceId)) next.delete(workspaceId); else next.add(workspaceId);
+      return next;
+    });
+  };
+
+  const renderPaneChoice = (pane: PaneInfo) => {
+    const selected = pane.pane_id === selectedPaneId;
+    const title = displayPaneTitle(pane);
+    return (
+      <li className={`workspace-pane-choice${selected ? " is-selected" : ""}`} key={pane.pane_id}>
+        <button type="button" className="pane-select" aria-current={selected ? "true" : undefined} title={`${pane.pane_id} — ${title}`} onClick={() => actions.selectPane(pane.pane_id)}>
+          <span className={`agent-mark-holder${pane.agent ? "" : " is-shell"}`} title={pane.agent ?? t("Shell")}>
+            {pane.agent ? <AgentMark agent={pane.agent} size={16} /> : <Terminal aria-hidden="true" />}
+          </span>
+          <span>{title}</span>
+          {pane.restore_error ? <RestoreErrorBadge reason={pane.restore_error} /> : <StatusBadge status={pane.agent_status} />}
+        </button>
+      </li>
+    );
+  };
+
   const renderWorkspace = (workspace: WorkspaceInfo, visiblePanes: PaneInfo[], scope = "") => {
     if (visiblePanes.length === 0) return null;
     const pane = currentPane(workspace, visiblePanes);
@@ -485,11 +513,30 @@ export function Sidebar({ snapshot, selectedPaneId, actions }: SidebarProps) {
             </span>
           </div>
           <div className="pane-actions">
+            {visiblePanes.length > 1 && (
+              <button
+                type="button"
+                className="sidebar-row-action workspace-panes-toggle"
+                aria-expanded={expandedWorkspaces.has(workspace.workspace_id)}
+                aria-controls={`workspace-panes-${workspace.workspace_id}`}
+                aria-label={expandedWorkspaces.has(workspace.workspace_id) ? t("Hide panes in {workspace}", { workspace: workspace.label }) : t("Show panes in {workspace}", { workspace: workspace.label })}
+                title={t("{count} panes", { count: visiblePanes.length })}
+                onClick={() => toggleWorkspacePanes(workspace.workspace_id)}
+              >
+                {expandedWorkspaces.has(workspace.workspace_id) ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+                <span>{visiblePanes.length}</span>
+              </button>
+            )}
             <button type="button" className="sidebar-row-action row-menu-toggle" aria-label={t("More for {title}", { title: displayTitle })} aria-haspopup="menu" aria-expanded={menuOpen} onClick={(event) => menuOpen ? setMenu(null) : setMenu({ anchor: event.currentTarget, workspace, pane, scope, title: displayTitle, place: place || workspace.label })}>
               <Ellipsis aria-hidden="true" />
             </button>
           </div>
         </div>
+        {expandedWorkspaces.has(workspace.workspace_id) && visiblePanes.length > 1 && (
+          <ul className="workspace-pane-list" id={`workspace-panes-${workspace.workspace_id}`} aria-label={t("Panes in {workspace}", { workspace: workspace.label })}>
+            {visiblePanes.map(renderPaneChoice)}
+          </ul>
+        )}
         {inlineError?.workspaceId === workspace.workspace_id && <p className="sidebar-inline-error" role="alert">{inlineError.message}</p>}
       </li>
     );

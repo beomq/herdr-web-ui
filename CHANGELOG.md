@@ -8,6 +8,11 @@ between releases do not reach them. Remote-PC runtime bundles are versioned sepa
 ## [Unreleased]
 
 ### Added
+- A workspace with more than one pane can be unfolded in the sidebar. Its row shows a pane count;
+  opening it lists every pane, with its agent and state, so one can be opened directly on a phone
+  as well as on a desktop. The tab strip remains available.
+
+### Added
 - `HERDR_WEB_PASTE_DIR` saves pasted and attached files to one directory instead of
   `.herdr-web-ui/` in each pane's project. It is read by the server, for the panes of its own
   PC; a remote PC keeps the default.
